@@ -1,0 +1,29 @@
+{
+  "configurations": [
+    {
+      "name": "Win32",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${workspaceFolder}/TempModFilter/include",
+        "${workspaceFolder}/TempModFilter/driver",
+        "${workspaceFolder}/TempModFilter/user",
+        "C:/Program Files (x86)/Windows Kits/10/Include/**",
+        "C:/Program Files/Microsoft Visual Studio/2022/**"
+      ],
+      "defines": [
+        "_DEBUG",
+        "UNICODE",
+        "_UNICODE",
+        "_WIN64",
+        "KMDF_VERSION_MAJOR=1",
+        "KMDF_VERSION_MINOR=15"
+      ],
+      "windowsSdkVersion": "10.0.22621.0",
+      "compilerPath": "cl.exe",
+      "cStandard": "c17",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "windows-msvc-x64"
+    }
+  ],
+  "version": 4
+}

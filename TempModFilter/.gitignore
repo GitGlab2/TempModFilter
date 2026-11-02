@@ -1,0 +1,25 @@
+# Build output
+build/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+ipch/
+
+# Driver / package artifacts
+*.sys
+*.pdb
+*.ilk
+*.obj
+*.exp
+*.lib
+*.cat
+*.inf.bak
+
+# Signing material - never commit these
+*.pfx
+*.cer
+*.pvk

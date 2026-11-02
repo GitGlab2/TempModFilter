@@ -1,0 +1,51 @@
+name: Build TempModFilter Driver
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Driver and Client
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Solution (Debug & Release)
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\TempModFilter\scripts\Build.ps1 -Configuration Release
+
+      - name: Sign Driver with Test Certificate
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\TempModFilter\scripts\Sign-Test.ps1
+
+      - name: Package Output Artifacts
+        shell: powershell
+        run: |
+          $artifactDir = ".\TempModFilter\package"
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          
+          # Copy driver binaries
+          Copy-Item ".\TempModFilter\build\Release\x64\driver\*" $artifactDir -Recurse -Force
+          # Copy client binary
+          Copy-Item ".\TempModFilter\build\Release\x64\user\FilterClient.exe" $artifactDir -Force
+          # Copy scripts
+          Copy-Item ".\TempModFilter\scripts\Install.ps1" $artifactDir -Force
+          Copy-Item ".\TempModFilter\scripts\Uninstall.ps1" $artifactDir -Force
+          Copy-Item ".\TempModFilter\scripts\Test-RoundTrip.ps1" $artifactDir -Force
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TempModFilter-Release-x64
+          path: .\TempModFilter\package\

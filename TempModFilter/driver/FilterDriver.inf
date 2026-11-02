@@ -1,0 +1,86 @@
+; ---------------------------------------------------------------------------
+; TempModFilter.inf
+;
+; Class upper-filter installation for the DiskDrive setup class.
+;
+; This INF is the "driver package" form.  It is installed with the legacy
+; DefaultInstall path, which is how class filters have always been installed:
+;
+;     rundll32.exe setupapi.dll,InstallHinfSection DefaultInstall 132 .\TempModFilter.inf
+;
+; (scripts\Install.ps1 -Mode Inf does exactly that for you.)
+;
+; It is NOT a PnP device INF: there is no [Manufacturer]/models section
+; because a class filter is not bound to a hardware ID.
+;
+; TEST MACHINES ONLY.  Read ..\README.md before installing anything.
+; ---------------------------------------------------------------------------
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = DiskDrive
+ClassGuid   = {4D36E967-E325-11CE-BFC1-08002BE10318}
+Provider    = %ProviderName%
+CatalogFile = TempModFilter.cat
+DriverVer   = 11/01/2026,1.0.0.0
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+TempModFilter.sys = 1,,
+
+; ---------------------------------------------------------------------------
+; Install
+; ---------------------------------------------------------------------------
+
+[DefaultInstall.NTamd64]
+CopyFiles = @TempModFilter.sys
+AddReg    = TempModFilter_ClassReg
+
+[DefaultInstall.NTamd64.Services]
+AddService = TempModFilter, 0x00000002, TempModFilter_ServiceInst
+
+[DefaultInstall.NTamd64.Wdf]
+KmdfService = TempModFilter, TempModFilter_WdfInst
+
+[TempModFilter_WdfInst]
+KmdfLibraryVersion = 1.15
+
+[TempModFilter_ServiceInst]
+DisplayName   = %ServiceDesc%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %12%\TempModFilter.sys
+
+; HKR here is the setup class key:
+;   HKLM\SYSTEM\CurrentControlSet\Control\Class\{4D36E967-...}
+; 0x00010008 = REG_MULTI_SZ + append (keeps any filter already registered).
+[TempModFilter_ClassReg]
+HKR,,UpperFilters,0x00010008,TempModFilter
+
+; ---------------------------------------------------------------------------
+; Uninstall (best effort)
+;
+; NOTE: the registry side is intentionally NOT handled here.  Deleting the
+; whole UpperFilters value would also remove filters that belong to somebody
+; else.  Use scripts\Uninstall.ps1, which removes only our entry and can
+; restore the exact previous value from its backup file.
+; ---------------------------------------------------------------------------
+
+[DefaultUninstall.NTamd64]
+DelFiles = @TempModFilter.sys
+
+[DefaultUninstall.NTamd64.Services]
+DelService = TempModFilter, 0x200
+
+; ---------------------------------------------------------------------------
+
+[Strings]
+ProviderName = "TempModFilter Lab"
+DiskName     = "Temporary in-memory IOCTL modification filter (lab only)"
+ServiceDesc  = "TempModFilter - temporary in-memory IOCTL modification filter"
