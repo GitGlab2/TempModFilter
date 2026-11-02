@@ -1996,8 +1996,11 @@ int main(int argc, char** argv)
     if (_stricmp(command, "installdate") == 0) return CommandSpoofInstallDate(argc, argv);
     if (_stricmp(command, "all") == 0) return CommandSpoofAll();
     if (_stricmp(command, "simulate") == 0) return CommandSimulate(argc, argv);
-    /* forward decl */
-    /* handled below */
+    if (_stricmp(command, "help") == 0 || strcmp(command, "--help") == 0 ||
+        strcmp(command, "-h") == 0) {
+        Usage();
+        return 0;
+    }
     if (_stricmp(command, "wmi") == 0) return CommandWmi(argc, argv);
 
     fprintf(stderr, "[-] unknown command: %s\n\n", command);
