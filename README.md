@@ -343,7 +343,7 @@ D:P(A;;GA;;;SY)(A;;GA;;;BA)
 | العَرَض | السبب المرجّح | الحل |
 | :--- | :--- | :--- |
 | `CreateFile` يفشل بـ 2 | الخدمة غير محمّلة | أعد التشغيل بعد التثبيت |
-| فشل التحميل 577 | التوقيع غير مقبول | `testsigning on` + Secure Boot off + أعد التوقيع |
+| فشل التحميل 577 | التوقيع غير مقبول | `testsigning on` + Secure Boot off + شغّل `Install.ps1` ليستورد `TempModFilter.cer` |
 | فشل التحميل 31 / 127 | تبعية KMDF غير محمّلة | تأكد أن البناء `DriverType=KMDF` وأن `Wdf01000.sys` يعمل |
 | `demo` يظهر الرقم الأصلي | الفلتر غير مرتبط بالفئة | تحقق من `UpperFilters` وأعد التشغيل |
 | `stats` يعرض `buffers scanned = 0` مع طلبات تمر | الإطار لم يوفّر حقل الإخراج | تأكد أن الطلب `METHOD_BUFFERED` وأن `TargetIoControl` يطابق كود الـ IOCTL |
