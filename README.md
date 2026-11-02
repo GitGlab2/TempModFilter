@@ -1,5 +1,7 @@
 # TempModFilter — مشروع التعديل المؤقت على مستوى النواة
 
+[![Build TempModFilter Driver](https://github.com/GitGlab2/TempModFilter/actions/workflows/build.yml/badge.svg)](https://github.com/GitGlab2/TempModFilter/actions/workflows/build.yml)
+
 مشروع عملي كامل مبني على [`docs/Kernel_Level_Drivers_Guide.md`](docs/Kernel_Level_Drivers_Guide.md):
 مشغّل فلتر علوي (Upper Filter Driver) بنمط **KMDF** يعترض طلبات الإدخال/الإخراج
 (`IRP`) داخل نواة Windows، ويعدّل **نسخة البيانات الموجودة في الذاكرة فقط** قبل
