@@ -198,11 +198,12 @@ bcdedit /set testsigning on
    `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4D36E967-E325-11CE-BFC1-08002BE10318}\UpperFilters`.
 7. يطلب إعادة تشغيل.
 
-إذا كنت تستخدم حزمة الـ Artifact من GitHub بدل نسخة الريبو:
+إذا كنت تستخدم الحزمة الجاهزة من صفحة Releases بدل نسخة الريبو:
 
 ```powershell
-Expand-Archive TempModFilter-Release-x64.zip -DestinationPath .
-cd TempModFilter-Release-x64
+# نزّل TempModFilter-vX.Y.Z-x64.zip من صفحة Releases، ثم:
+Expand-Archive .\TempModFilter-v0.1.1-x64.zip -DestinationPath .\TempModFilter
+cd .\TempModFilter
 .\Install.ps1
 ```
 
