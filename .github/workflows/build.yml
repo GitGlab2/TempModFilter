@@ -9,43 +9,43 @@ on:
 
 jobs:
   build:
-    name: Build Driver and Client
+    name: Build Driver and Client (Release x64)
     runs-on: windows-2022
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build Solution (Debug & Release)
+      - name: Build Solution (Driver + Client)
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File .\TempModFilter\scripts\Build.ps1 -Configuration Release
+          powershell -ExecutionPolicy Bypass -File .\scripts\Build.ps1 -Configuration Release
 
       - name: Sign Driver with Test Certificate
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File .\TempModFilter\scripts\Sign-Test.ps1
+          powershell -ExecutionPolicy Bypass -File .\scripts\Sign-Test.ps1
 
-      - name: Package Output Artifacts
+      - name: Prepare Release Package
         shell: powershell
         run: |
-          $artifactDir = ".\TempModFilter\package"
-          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          $packageDir = ".\package"
+          New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           
-          # Copy driver binaries
-          Copy-Item ".\TempModFilter\build\Release\x64\driver\*" $artifactDir -Recurse -Force
-          # Copy client binary
-          Copy-Item ".\TempModFilter\build\Release\x64\user\FilterClient.exe" $artifactDir -Force
-          # Copy scripts
-          Copy-Item ".\TempModFilter\scripts\Install.ps1" $artifactDir -Force
-          Copy-Item ".\TempModFilter\scripts\Uninstall.ps1" $artifactDir -Force
-          Copy-Item ".\TempModFilter\scripts\Test-RoundTrip.ps1" $artifactDir -Force
+          # Copy driver binary and INF
+          Copy-Item ".\build\Release\x64\driver\*" $packageDir -Recurse -Force
+          # Copy user client binary
+          Copy-Item ".\build\Release\x64\user\FilterClient.exe" $packageDir -Force
+          # Copy installation scripts
+          Copy-Item ".\scripts\Install.ps1" $packageDir -Force
+          Copy-Item ".\scripts\Uninstall.ps1" $packageDir -Force
+          Copy-Item ".\scripts\Test-RoundTrip.ps1" $packageDir -Force
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TempModFilter-Release-x64
-          path: .\TempModFilter\package\
+          path: .\package\

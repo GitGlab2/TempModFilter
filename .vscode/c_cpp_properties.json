@@ -4,9 +4,9 @@
       "name": "Win32",
       "includePath": [
         "${workspaceFolder}/**",
-        "${workspaceFolder}/TempModFilter/include",
-        "${workspaceFolder}/TempModFilter/driver",
-        "${workspaceFolder}/TempModFilter/user",
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/driver",
+        "${workspaceFolder}/user",
         "C:/Program Files (x86)/Windows Kits/10/Include/**",
         "C:/Program Files/Microsoft Visual Studio/2022/**"
       ],
