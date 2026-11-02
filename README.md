@@ -116,6 +116,9 @@ cd TempModFilter
 .\scripts\Build.ps1 -Configuration Release
 ```
 
+> مش محتاج WDK محلياً لو هتستخدم الحزمة الجاهزة: نزّلها من صفحة
+> [Releases](https://github.com/GitGlab2/TempModFilter/releases).
+
 المخرجات:
 
 ```
