@@ -39,7 +39,7 @@ TempModRelease(
     )
 {
     if (AtDispatch) {
-        KeReleaseSpinLockAtDpcLevel(&State->Lock);
+        KeReleaseSpinLockFromDpcLevel(&State->Lock);
     } else {
         KeReleaseSpinLock(&State->Lock, OldIrql);
     }

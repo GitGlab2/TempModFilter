@@ -65,17 +65,26 @@ $kitRoots = @(
     (Join-Path $env:ProgramFiles 'Windows Kits\10')
 )
 
-$wdkFound = $false
+$wdkVersion = $null
+$wdkInclude = $null
 foreach ($root in $kitRoots) {
     $includeRoot = Join-Path $root 'Include'
     if (-not (Test-Path $includeRoot)) { continue }
 
-    $wdfHeader = Get-ChildItem -Path $includeRoot -Recurse -Filter 'wdf.h' `
-                               -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($wdfHeader) { $wdkFound = $true; break }
+    $candidate = Get-ChildItem -Path $includeRoot -Directory -Filter '10.0.*' `
+                              -ErrorAction SilentlyContinue |
+                 Where-Object { Test-Path (Join-Path $_.FullName 'km\ntddk.h') } |
+                 Sort-Object { [version]$_.Name } -Descending |
+                 Select-Object -First 1
+
+    if ($candidate) {
+        $wdkVersion = $candidate.Name
+        $wdkInclude = $candidate.FullName
+        break
+    }
 }
 
-if (-not $wdkFound) {
+if (-not $wdkVersion) {
     Write-Host ''
     Write-Host '[-] Windows Driver Kit (WDK) not found.' -ForegroundColor Red
     Write-Host '    Install the WDK for your Windows version, then re-run this script:'
@@ -86,7 +95,8 @@ if (-not $wdkFound) {
 }
 
 Write-Host "    msbuild     : $msbuild"
-Write-Host "    wdk headers : $($wdfHeader.Directory.Parent.FullName)"
+Write-Host "    wdk version : $wdkVersion"
+Write-Host "    wdk headers : $wdkInclude"
 
 # ---------------------------------------------------------------------------
 # 3. Build
@@ -106,6 +116,7 @@ $arguments = @(
     "/v:minimal"
     "/p:Configuration=$Configuration"
     "/p:Platform=$Platform"
+    "/p:WindowsTargetPlatformVersion=$wdkVersion"
 )
 
 Write-Host ''

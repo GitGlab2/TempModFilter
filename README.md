@@ -1,6 +1,6 @@
 # TempModFilter — مشروع التعديل المؤقت على مستوى النواة
 
-مشروع عملي كامل مبني على [`../Kernel_Level_Drivers_Guide.md`](../Kernel_Level_Drivers_Guide.md):
+مشروع عملي كامل مبني على [`docs/Kernel_Level_Drivers_Guide.md`](docs/Kernel_Level_Drivers_Guide.md):
 مشغّل فلتر علوي (Upper Filter Driver) بنمط **KMDF** يعترض طلبات الإدخال/الإخراج
 (`IRP`) داخل نواة Windows، ويعدّل **نسخة البيانات الموجودة في الذاكرة فقط** قبل
 تسليمها لبرنامج المستخدم.
@@ -62,8 +62,11 @@
 ## 4. بنية الملفات
 
 ```
-TempModFilter/
+TempModFilter/                     جذر المستودع
 ├── TempModFilter.sln              حل Visual Studio (x64 فقط)
+├── README.md
+├── LICENSE
+├── .github/workflows/build.yml    بناء تلقائي على GitHub Actions
 ├── include/
 │   └── TempModShared.h            العقد المشترك: IOCTLs + Structs (UM/KM)
 ├── driver/
@@ -81,7 +84,8 @@ TempModFilter/
 │   ├── Uninstall.ps1              إزالة جراحية + استرجاع النسخة الاحتياطية
 │   └── Test-RoundTrip.ps1         تحقق شامل قبل/بعد
 └── docs/
-    └── GUIDE-CORRECTIONS.md       أخطاء الكود في الدليل الأصلي وتصحيحها
+    ├── Kernel_Level_Drivers_Guide.md   الدليل الأصلي
+    └── GUIDE-CORRECTIONS.md            أخطاء الكود في الدليل وتصحيحها
 ```
 
 ---
@@ -104,6 +108,7 @@ TempModFilter/
 ## 6. البناء
 
 ```powershell
+git clone https://github.com/GitGlab2/TempModFilter.git
 cd TempModFilter
 .\scripts\Build.ps1                     # Debug|x64
 .\scripts\Build.ps1 -Configuration Release

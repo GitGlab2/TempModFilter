@@ -26,6 +26,7 @@
     <TargetVersion>Windows10</TargetVersion>
     <SignMode>Off</SignMode>
     <EnableInf2Cat>false</EnableInf2Cat>
+    <SkipPackageVerification>true</SkipPackageVerification>
     <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
     <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
     <SpectreMitigation>false</SpectreMitigation>
