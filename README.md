@@ -1,4 +1,4 @@
-# TempModFilter — HWID Spoofer (مختبر)
+﻿# TempModFilter — HWID Spoofer (مختبر)
 
 > أداة تغيير هوية الجهاز (HWID Spoofer) مؤقتة في الذاكرة (RAM) + Registry لـ Windows.
 > **للاستخدام في المختبر / VM فقط.** لا تقم بتثبيته على مضيف إنتاج.
@@ -81,6 +81,14 @@ FilterClient.exe help
 بنية النمط (Pattern): `"ABC123"` أو `"hex:41 42 43"`.
 
 ---
+
+
+### 
+One-click run
+ `Spoofer-Setup.cmd` / `Spoofer-Run.cmd`
+
+- `Spoofer-Setup.cmd`: double-click -> admin -> test signing + sign driver + install -> reboot prompt.
+- `Spoofer-Run.cmd`: after reboot, double-click -> numbered menu (status / show / backup / spoof all / spoof disk / wmi / restore / demo).
 
 ## البناء (Build)
 
