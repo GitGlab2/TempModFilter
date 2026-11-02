@@ -10,32 +10,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Locate WDK files
+      - name: Find driver toolset
         shell: powershell
         run: |
-          "=== VSIX files ==="
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Vsix" -Recurse -Filter *.vsix -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty FullName
-          "=== VSIXInstaller ==="
-          Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer" -Filter 'vsixinstaller.exe' -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty FullName
-          "=== Platform toolsets before ==="
-          Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\Platforms\x64\PlatformToolsets" -Directory -ErrorAction SilentlyContinue |
+          "=== Windows Kits top level ==="
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10" -Directory -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty Name
-
-      - name: Install WDK VS extension
-        shell: powershell
-        run: |
-          $vsix = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Vsix" -Recurse -Filter *.vsix -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match 'VS2022' } | Select-Object -First 1
-          if (-not $vsix) { Write-Host 'NO VS2022 VSIX FOUND'; exit 1 }
-          Write-Host "Installing $($vsix.FullName)"
-          $installer = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer" -Filter 'vsixinstaller.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          & $installer.FullName /quiet /admin $vsix.FullName
-          Write-Host "vsixinstaller exit=$LASTEXITCODE"
-          "=== Platform toolsets after ==="
-          Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\Platforms\x64\PlatformToolsets" -Directory -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty Name
+          "=== WDK props anywhere in VS ==="
+          Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022" -Recurse -Filter '*KernelModeDriver*' -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+          "=== WDK-ish files under Windows Kits ==="
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits" -Recurse -Filter '*KernelModeDriver*' -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+          "=== VS extensions mentioning driver ==="
+          Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\Extensions" -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'Driver|WDK' } |
+            Select-Object -ExpandProperty FullName
+          "=== Installed Roots ==="
+          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots' -ErrorAction SilentlyContinue |
+            Format-List
 
       - name: Build
         shell: powershell
