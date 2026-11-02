@@ -119,6 +119,16 @@ cd TempModFilter
 > مش محتاج WDK محلياً لو هتستخدم الحزمة الجاهزة: نزّلها من صفحة
 > [Releases](https://github.com/GitGlab2/TempModFilter/releases).
 
+### إصدار جديد
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+أي tag يبدأ بـ `v` يشغّل البناء ثم ينشر Release تلقائياً بالحزمة الموقّعة،
+وإصدارات `v0.x` تُنشر كـ **Pre-release**.
+
 المخرجات:
 
 ```
@@ -225,6 +235,16 @@ $c = ".\build\Debug\x64\user\FilterClient.exe"
 & $c set --pattern "ABC123" --replace 0x2A --ioctl 0x2D1400 --max 8
 & $c clear                      # تعطيل فوري (pass-through)
 & $c demo --drive 0             # اختبار قبل/بعد على قرص
+& $c simulate                   # محاكاة الخوارزمية — بدون مشغّل إطلاقاً
+```
+
+`simulate` يشغّل نفس خوارزمية `TempModRedactBuffer` على نسخة في الذاكرة،
+ويطبع قبل/بعد بالـ hex. مفيد لتجربة السلوك على أي جهاز (حتى بدون تثبيت
+المشغّل أو `testsigning`):
+
+```powershell
+& $c simulate --pattern "WD-WCC4E1234567" --replace 0x23 --max 1
+& $c simulate --pattern "ABC" --sample "ABC 123 ABC"
 ```
 
 ### صيغة النمط

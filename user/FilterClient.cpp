@@ -528,6 +528,136 @@ static int CommandDemo(int argc, char** argv)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Simulate: run the same redaction algorithm in user mode (no driver)       */
+/* ------------------------------------------------------------------------- */
+
+static ULONG SimulateRedact(BYTE* buffer, size_t length, const TEMPMOD_POLICY& policy)
+{
+    size_t patternLength = policy.PatternLength;
+
+    if (patternLength == 0 ||
+        patternLength > TEMPMOD_PATTERN_MAX ||
+        patternLength > length) {
+        return 0;
+    }
+
+    ULONG limit = policy.MaxReplacementsPerRequest;
+    if (limit == 0) {
+        limit = TEMPMOD_DEFAULT_MAX_REPLACEMENTS;
+    }
+
+    ULONG replacements = 0;
+
+    for (size_t index = 0;
+         (index + patternLength) <= length && replacements < limit;
+         index++) {
+
+        if (buffer[index] != policy.Pattern[0]) {
+            continue;
+        }
+
+        if (memcmp(buffer + index, policy.Pattern, patternLength) != 0) {
+            continue;
+        }
+
+        memset(buffer + index, policy.Replacement, patternLength);
+        replacements++;
+        index += (patternLength - 1);
+    }
+
+    return replacements;
+}
+
+static void DumpBytes(const char* label, const BYTE* data, size_t length)
+{
+    printf("  %s\n", label);
+
+    for (size_t offset = 0; offset < length; offset += 16) {
+        printf("    %04zX  ", offset);
+
+        for (size_t i = 0; i < 16; i++) {
+            if (offset + i < length) {
+                printf("%02X ", data[offset + i]);
+            } else {
+                printf("   ");
+            }
+        }
+
+        printf(" |");
+
+        for (size_t i = 0; i < 16 && offset + i < length; i++) {
+            BYTE c = data[offset + i];
+            printf("%c", (c >= 0x20 && c < 0x7F) ? c : '.');
+        }
+
+        printf("|\n");
+    }
+}
+
+static int CommandSimulate(int argc, char** argv)
+{
+    const char* patternText = FindOption(argc, argv, "--pattern");
+    const char* replaceText = FindOption(argc, argv, "--replace");
+    const char* maxText     = FindOption(argc, argv, "--max");
+    const char* sampleText  = FindOption(argc, argv, "--sample");
+
+    TEMPMOD_POLICY policy;
+    memset(&policy, 0, sizeof(policy));
+
+    policy.Version = TEMPMOD_POLICY_VERSION;
+    policy.Enabled = 1;
+    policy.Replacement = (UCHAR)((replaceText != NULL)
+                                     ? strtoul(replaceText, NULL, 0)
+                                     : '*');
+    policy.MaxReplacementsPerRequest = (maxText != NULL)
+                                           ? (ULONG)strtoul(maxText, NULL, 0)
+                                           : 0;
+
+    if (!ParsePattern((patternText != NULL) ? patternText
+                                            : "WD-WCC4E1234567",
+                      policy)) {
+        return 2;
+    }
+
+    const char* sample = (sampleText != NULL)
+        ? sampleText
+        : "serial: WD-WCC4E1234567\r\n"
+          "model : ST2000DM001\r\n"
+          "serial: WD-WCC4E1234567\r\n"
+          "flag  : keep-me-intact\r\n";
+
+    size_t length = strlen(sample);
+    if (length == 0) {
+        fprintf(stderr, "[-] empty sample\n");
+        return 2;
+    }
+
+    BYTE* buffer = (BYTE*)malloc(length);
+    if (buffer == NULL) {
+        fprintf(stderr, "[-] out of memory\n");
+        return 1;
+    }
+    memcpy(buffer, sample, length);
+
+    printf("[*] user-mode simulation - no driver, no disk access\n\n");
+    PrintPolicy(policy);
+    printf("\n");
+
+    DumpBytes("before", buffer, length);
+
+    ULONG replacements = SimulateRedact(buffer, length, policy);
+
+    printf("\n");
+    DumpBytes("after", buffer, length);
+
+    printf("\n    replacements   : %lu\n", (unsigned long)replacements);
+    printf("    scope          : only the copy above, nothing was written\n");
+
+    free(buffer);
+    return (replacements > 0) ? 0 : 1;
+}
+
+/* ------------------------------------------------------------------------- */
 
 static void Usage(void)
 {
@@ -542,6 +672,9 @@ static void Usage(void)
         "        --max     8           replacements per request\n"
         "  clear                       disarm (pass-through)\n"
         "  demo [--drive 0]            before/after round-trip on a disk\n"
+        "  simulate [--pattern <p>]    run the redaction algorithm in user\n"
+        "        [--replace 0x2A] [--max 8] [--sample <text>]\n"
+        "                              mode, no driver required\n"
         "  help                        this text\n"
         "\n"
         "  pattern syntax:  \"ABC123\"  or  \"hex:41 42 43\"\n");
@@ -573,6 +706,9 @@ int main(int argc, char** argv)
     }
     if (_stricmp(command, "demo") == 0) {
         return CommandDemo(argc, argv);
+    }
+    if (_stricmp(command, "simulate") == 0) {
+        return CommandSimulate(argc, argv);
     }
     if (_stricmp(command, "help") == 0 || strcmp(command, "--help") == 0) {
         Usage();
