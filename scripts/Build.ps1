@@ -73,30 +73,49 @@ $kitRoots = @(
 
 $wdkVersion = $null
 $wdkInclude = $null
+$partialVersion = $null
 foreach ($root in $kitRoots) {
     $includeRoot = Join-Path $root 'Include'
     if (-not (Test-Path $includeRoot)) { continue }
 
-    $candidate = Get-ChildItem -Path $includeRoot -Directory -Filter '10.0.*' `
-                              -ErrorAction SilentlyContinue |
-                 Where-Object { Test-Path (Join-Path $_.FullName 'km\ntddk.h') } |
-                 Sort-Object { [version]$_.Name } -Descending |
-                 Select-Object -First 1
+    $candidates = Get-ChildItem -Path $includeRoot -Directory -Filter '10.0.*' `
+                                -ErrorAction SilentlyContinue |
+                   Where-Object { Test-Path (Join-Path $_.FullName 'km\ntddk.h') } |
+                   Sort-Object { [version]$_.Name } -Descending
 
-    if ($candidate) {
-        $wdkVersion = $candidate.Name
-        $wdkInclude = $candidate.FullName
-        break
+    foreach ($candidate in $candidates) {
+        # A usable version needs both halves: the kernel headers from the WDK
+        # *and* the user-mode headers from the matching Windows SDK.
+        if (Test-Path (Join-Path $candidate.FullName 'um\windows.h')) {
+            $wdkVersion = $candidate.Name
+            $wdkInclude = $candidate.FullName
+            break
+        }
+        if (-not $partialVersion) { $partialVersion = $candidate.Name }
     }
+
+    if ($wdkVersion) { break }
 }
 
 if (-not $wdkVersion) {
     Write-Host ''
-    Write-Host '[-] Windows Driver Kit (WDK) not found.' -ForegroundColor Red
-    Write-Host '    Install the WDK for your Windows version, then re-run this script:'
-    Write-Host '      https://learn.microsoft.com/windows-hardware/drivers/download-the-wdk'
-    Write-Host '    The WDK VS extension is what provides the'
-    Write-Host '    "WindowsKernelModeDriver10.0" platform toolset.'
+    if ($partialVersion) {
+        Write-Host "[-] WDK $partialVersion is installed, but the matching Windows SDK is not." -ForegroundColor Red
+        Write-Host "    The kernel headers in Include\$partialVersion\km exist, yet"
+        Write-Host "    Include\$partialVersion\um\windows.h is missing, so MSBuild cannot"
+        Write-Host "    resolve the SDK version and fails with MSB8036."
+        Write-Host ''
+        Write-Host '    Install the Windows SDK with the same version in the Visual Studio'
+        Write-Host '    Installer (Individual components -> Windows SDK), or install a WDK'
+        Write-Host '    whose version matches an SDK that is already present:'
+        Write-Host '      https://learn.microsoft.com/windows-hardware/drivers/download-the-wdk'
+    } else {
+        Write-Host '[-] Windows Driver Kit (WDK) not found.' -ForegroundColor Red
+        Write-Host '    Install the WDK for your Windows version, then re-run this script:'
+        Write-Host '      https://learn.microsoft.com/windows-hardware/drivers/download-the-wdk'
+        Write-Host '    The WDK VS extension is what provides the'
+        Write-Host '    "WindowsKernelModeDriver10.0" platform toolset.'
+    }
     exit 1
 }
 
