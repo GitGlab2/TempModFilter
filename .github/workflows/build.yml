@@ -47,6 +47,8 @@ jobs:
           # Copy installation scripts
           Copy-Item ".\scripts\Install.ps1" $packageDir -Force
           Copy-Item ".\scripts\Uninstall.ps1" $packageDir -Force
+          Copy-Item ".\scripts\Session-Arm.ps1" $packageDir -Force
+          Copy-Item ".\scripts\Session-Cleanup.ps1" $packageDir -Force
           Copy-Item ".\scripts\Test-RoundTrip.ps1" $packageDir -Force
 
       - name: Upload Build Artifacts

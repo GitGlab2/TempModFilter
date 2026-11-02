@@ -90,6 +90,42 @@ One-click run
 - `Spoofer-Setup.cmd`: double-click -> admin -> test signing + sign driver + install -> reboot prompt.
 - `Spoofer-Run.cmd`: after reboot, double-click -> numbered menu (status / show / backup / spoof all / spoof disk / wmi / restore / demo).
 
+### Temporary mode (default)
+
+`Spoofer-Setup.cmd` arms a **one-boot session** by default.  The lifecycle is:
+
+1. `Spoofer-Setup.cmd` enables test signing, signs/installs the driver and
+   registers the `TempModFilter-ArmSession` startup task.  Reboot.
+2. On that boot the filter attaches and the arm task:
+   - removes `TempModFilter` from the `DiskDrive` class `UpperFilters`
+     (the loaded filter keeps working for this boot),
+   - sets `testsigning off` for the next boot,
+   - registers `TempModFilter-FinishCleanup` for the following startup.
+3. Use `Spoofer-Run.cmd` during that boot.
+4. Restart at any time.  The next boot is clean: the service, the `.sys`, the
+   lab certificate, the registry identity backup and test mode are removed.
+
+If the machine loses power or bugchecks, the cleanup still runs on the next
+boot.  Test signing is only switched off after the filter registration is
+gone, so the "test signing off + filter still registered" unbootable state
+cannot happen.
+
+If the driver never loads at all, the arm task retries on three boots and then
+removes the session by itself, so the machine cannot stay in test mode.
+
+State and logs live in `C:\ProgramData\TempModFilter` (`session.log`,
+`cleanup.log`, `identity-backup.txt`).
+
+Manual controls:
+
+```powershell
+.\scripts\Session-Cleanup.ps1 -RestoreRegistry -RemoveCertificate  # clean now
+.\scripts\Uninstall.ps1 -Reboot                                    # clean + restart
+```
+
+Use `Spoofer-Setup.cmd` with `-Persistent` (or `Install.ps1` without
+`-Temporary`) only for a permanent lab installation that you remove by hand.
+
 ## البناء (Build)
 
 المتطلبات: Windows 10/11 x64، Visual Studio 2022 مع "Desktop development with C++"،
@@ -130,7 +166,8 @@ bcdedit /set testsigning on
 ## التثبيت (Install)
 
 ```powershell
-.\scripts\Install.ps1
+.\scripts\Install.ps1 -Temporary     # temporary one-boot session (recommended)
+.\scripts\Install.ps1                # permanent until Uninstall.ps1
 ```
 
 ثم أعد التشغيل (Reboot) ليتم ربط الفلتر بفئة الأقراص (disk class).
@@ -139,7 +176,7 @@ bcdedit /set testsigning on
 
 ```powershell
 .\scripts\Uninstall.ps1
-.\scripts\Uninstall.ps1 -RestoreBackup -Reboot
+.\scripts\Uninstall.ps1 -Reboot
 ```
 
 ---

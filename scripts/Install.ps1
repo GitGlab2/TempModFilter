@@ -36,6 +36,7 @@ param(
     [string]$ServiceName = 'TempModFilter',
     [string]$ClassGuid   = '{4D36E967-E325-11CE-BFC1-08002BE10318}',
 
+    [switch]$Temporary,
     [switch]$Force,
     [switch]$NoPrompt
 )
@@ -55,6 +56,77 @@ function Write-Step    { param([string]$Text) Write-Host "    $Text" }
 function Write-Ok      { param([string]$Text) Write-Host "[+] $Text" -ForegroundColor Green }
 function Write-Warn    { param([string]$Text) Write-Host "[!] $Text" -ForegroundColor Yellow }
 function Write-Fail    { param([string]$Text) Write-Host "[-] $Text" -ForegroundColor Red }
+
+function Find-Client {
+    $candidates = @(
+        (Join-Path $scriptRoot 'FilterClient.exe'),
+        (Join-Path $projectRoot 'build\manual\FilterClient.exe'),
+        (Join-Path $projectRoot 'package\TempModFilter-Release-x64\FilterClient.exe'),
+        (Join-Path $projectRoot 'build\Release\x64\user\FilterClient.exe'),
+        (Join-Path $projectRoot 'build\Debug\x64\user\FilterClient.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
+function Install-TemporarySession {
+    # Copy the session scripts + client somewhere stable, then register the
+    # one-shot "arm" task.  The arm script itself registers the finish-cleanup
+    # task for the following boot.
+    $dataDir = Join-Path $env:ProgramData 'TempModFilter'
+    New-Item -Path $dataDir -ItemType Directory -Force | Out-Null
+
+    foreach ($name in @('Session-Arm.ps1', 'Session-Cleanup.ps1')) {
+        $source = Join-Path $scriptRoot $name
+        if (-not (Test-Path $source)) {
+            Write-Fail "temporary mode needs $name next to Install.ps1"
+            return $false
+        }
+        Copy-Item -Path $source -Destination (Join-Path $dataDir $name) -Force
+    }
+
+    $client = Find-Client
+    if ($client) {
+        Copy-Item -Path $client -Destination (Join-Path $dataDir 'FilterClient.exe') -Force
+        Write-Step "client copy  : $dataDir\FilterClient.exe"
+    } else {
+        Write-Warn 'FilterClient.exe not found; cleanup will still remove the driver.'
+    }
+
+    # A new session replaces any stale finish-cleanup task.
+    if (Get-ScheduledTask -TaskName 'TempModFilter-FinishCleanup' -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName 'TempModFilter-FinishCleanup' -Confirm:$false -ErrorAction SilentlyContinue
+    }
+
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $arm        = Join-Path $dataDir 'Session-Arm.ps1'
+
+    $action    = New-ScheduledTaskAction -Execute $powershell `
+                     -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$arm`""
+    $trigger   = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+                     -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
+                     -StartWhenAvailable -MultipleInstances IgnoreNew
+
+    try {
+        Register-ScheduledTask -TaskName 'TempModFilter-ArmSession' -Action $action `
+            -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Fail "could not register the arm task: $($_.Exception.Message)"
+        return $false
+    }
+
+    if (-not (Get-ScheduledTask -TaskName 'TempModFilter-ArmSession' -ErrorAction SilentlyContinue)) {
+        Write-Fail 'the arm task is not visible after registration.'
+        return $false
+    }
+
+    Write-Ok 'temporary session armed (one boot only)'
+    return $true
+}
 
 # ---------------------------------------------------------------------------
 # Banner + guard rails
@@ -92,18 +164,29 @@ if (-not $isVirtual -and -not $Force) {
 }
 
 # Test-signing check --------------------------------------------------------
+#
+# Registering the filter while test signing is OFF is exactly the state that
+# makes the next boot unbootable: the class filter is still in UpperFilters,
+# but the kernel refuses to load the test-signed driver.  Therefore test
+# signing is enabled *before* the filter is registered, and the install is
+# aborted if that cannot be done.
+#
+# `bcdedit /set` is idempotent, so no localized text parsing is needed.  The
+# bare form targets {current} (see "bcdedit /? /set") and is the fallback.
 
-try {
-    $bcd = & bcdedit.exe /enum '{current}' 2>$null
-    if ($bcd -match 'testsigning\s+Yes') {
-        Write-Step 'test signing  : ON'
-    } else {
-        Write-Warn 'test signing appears to be OFF.'
-        Write-Host '    An unsigned/untrusted driver will be rejected with error 577.'
-        Write-Host '    In the VM:  bcdedit /set testsigning on  (then reboot, Secure Boot off)'
-    }
-} catch {
-    Write-Warn 'could not query bcdedit for the test-signing state.'
+$tsOut = & bcdedit.exe /set '{current}' testsigning on 2>&1
+if ($LASTEXITCODE -ne 0) {
+    $tsOut = & bcdedit.exe /set testsigning on 2>&1
+}
+if ($LASTEXITCODE -eq 0) {
+    Write-Step 'test signing  : ON'
+} else {
+    Write-Fail "test signing could not be enabled: $($tsOut | Out-String)"
+    Write-Host '    Turn Secure Boot off in the firmware, or enable test'
+    Write-Host '    signing manually, then run this script again.'
+    Write-Host '    Refusing to register the filter blindly: doing that with'
+    Write-Host '    test signing off can make the machine unable to boot.'
+    exit 1
 }
 
 # ---------------------------------------------------------------------------
@@ -328,8 +411,32 @@ Write-Host ''
 Write-Host '  A reboot is required: the filter is attached when the disk'
 Write-Host '  devices are started, not when the service is created.'
 Write-Host ''
-Write-Ok 'done. Reboot the VM, then run scripts\Test-RoundTrip.ps1'
+
+if ($Temporary) {
+    Write-Host '  temporary mode (one boot only)'
+    if (-not (Install-TemporarySession)) {
+        Write-Fail 'temporary mode could not be armed - rolling the install back.'
+        $cleanup = Join-Path $scriptRoot 'Session-Cleanup.ps1'
+        if (Test-Path $cleanup) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cleanup -ServiceName $ServiceName
+        }
+        Write-Host '    The filter is no longer registered; run this script again.' -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Host '    * Reboot now. That boot is the spoofing session.'
+    Write-Host '    * At startup the session is armed: the filter registration is'
+    Write-Host '      removed and test signing is switched off for the next boot.'
+    Write-Host '    * Any restart after the session removes the service, the .sys,'
+    Write-Host '      the certificate, the registry changes and test mode.'
+    Write-Host '    * If the machine loses power mid-session, the cleanup task'
+    Write-Host '      still runs on the next boot - it can never leave the box'
+    Write-Host '      unable to boot.'
+    Write-Host ''
+    Write-Ok 'done. Reboot now to start the one-boot temporary session.'
+} else {
+    Write-Ok 'done. Reboot the VM, then run scripts\Test-RoundTrip.ps1'
+}
+
 Write-Host ''
 Write-Host '  To roll back at any time:' -ForegroundColor Cyan
 Write-Host '    .\scripts\Uninstall.ps1 -Reboot'
-Write-Host ''

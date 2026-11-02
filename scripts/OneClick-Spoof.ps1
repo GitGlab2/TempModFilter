@@ -18,7 +18,11 @@
 [CmdletBinding()]
 param(
     [ValidateSet('setup', 'menu')]
-    [string]$Mode = 'setup'
+    [string]$Mode = 'setup',
+
+    # Permanent installs are opt-in.  The default is a one-boot session that
+    # removes itself on the next restart.
+    [switch]$Persistent
 )
 
 $ErrorActionPreference = 'Continue'
@@ -78,7 +82,12 @@ function Banner {
     Write-Host ''
     Write-Host '=============================================================' -ForegroundColor Yellow
     Write-Host " HWID Spoofer  -  $Title" -ForegroundColor Yellow
-    Write-Host ' LAB / TEST MACHINES ONLY' -ForegroundColor Yellow
+    if ($Persistent) {
+        Write-Host ' LAB / TEST MACHINES ONLY - PERMANENT INSTALL' -ForegroundColor Yellow
+    } else {
+        Write-Host ' LAB / TEST MACHINES ONLY - TEMPORARY (one boot)' -ForegroundColor Yellow
+        Write-Host ' A restart after the session removes everything.' -ForegroundColor Yellow
+    }
     Write-Host '=============================================================' -ForegroundColor Yellow
     Write-Host ''
 }
@@ -123,7 +132,10 @@ if ($Mode -eq 'setup') {
 
     # -- 3. Test signing ----------------------------------------------------
     Write-Host '[*] enabling test signing (bcdedit /set testsigning on)...'
-    $bcdOut = & bcdedit.exe /set testsigning on 2>&1
+    $bcdOut = & bcdedit.exe /set '{current}' testsigning on 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $bcdOut = & bcdedit.exe /set testsigning on 2>&1
+    }
     if ($LASTEXITCODE -eq 0) {
         Write-Host '[+] test signing enabled. A REBOOT is required for it to apply.' -ForegroundColor Green
     } elseif ("$bcdOut" -match 'denied|access') {
@@ -149,9 +161,14 @@ if ($Mode -eq 'setup') {
 
     # -- 5. Install the kernel service -------------------------------------
     Write-Host '[*] installing the kernel service...'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass `
-        -File (Join-Path $scriptRoot 'Install.ps1') `
-        -DriverPath $sys.FullName -Force -NoPrompt
+    $installArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', (Join-Path $scriptRoot 'Install.ps1'),
+        '-DriverPath', $sys.FullName,
+        '-Force', '-NoPrompt'
+    )
+    if (-not $Persistent) { $installArgs += '-Temporary' }
+    & powershell.exe @installArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host '[-] install step reported a problem - see messages above.' -ForegroundColor Red
     }
@@ -161,9 +178,16 @@ if ($Mode -eq 'setup') {
     Write-Host '=============================================================' -ForegroundColor Green
     if ($client) {
         Write-Host '[+] SETUP COMPLETE.' -ForegroundColor Green
-        Write-Host '    1. Let Windows reboot now (required for test signing + filter).'
-        Write-Host '    2. After the reboot: double-click Spoofer-Run.cmd'
-        Write-Host '       and pick a numbered action from the menu.'
+        if ($Persistent) {
+            Write-Host '    PERMANENT install: everything stays until Uninstall.ps1.'
+            Write-Host '    Reboot now, then double-click Spoofer-Run.cmd.'
+        } else {
+            Write-Host '    TEMPORARY session (one boot):'
+            Write-Host '    1. Reboot now - that boot is the spoofing session.'
+            Write-Host '    2. Use Spoofer-Run.cmd during that boot.'
+            Write-Host '    3. Restart at any time: the driver, the certificate, the'
+            Write-Host '       registry changes and test mode are removed automatically.'
+        }
     } else {
         Write-Host '[!] Setup done, but FilterClient.exe was not found.' -ForegroundColor Yellow
         Write-Host '    Build the client, then run Spoofer-Run.cmd.'
@@ -189,20 +213,32 @@ if ($Mode -eq 'menu') {
         exit 1
     }
 
+    & $client status *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '[!] The filter is NOT loaded in this boot.' -ForegroundColor Yellow
+        Write-Host '    Run Spoofer-Setup.cmd, let it reboot once, then use this menu.'
+        Write-Host '    (Temporary mode gives you exactly one boot of spoofing.)'
+        Write-Host ''
+    }
+
+    $cleanupScript = Join-Path $scriptRoot 'Session-Cleanup.ps1'
+
     $running = $true
     while ($running) {
         Write-Host ''
-        Write-Host '---------------------------------------------'
+        Write-Host '--------------------------------------------------'
         Write-Host ' 1) Driver status          (is the filter up?)'
         Write-Host ' 2) Show machine identity   (disks/mac/regs)'
         Write-Host ' 3) BACKUP current IDs   <- always run first'
         Write-Host ' 4) SPOOF ALL (disk + registry, random)'
-        Write-Host ' 5) SPOOF disk only (RAM, survives reboot)'
+        Write-Host ' 5) SPOOF disk only (RAM only - reverts on reboot)'
         Write-Host ' 6) WMI identity (show)'
         Write-Host ' 7) RESTORE original IDs (undo registry+filter)'
         Write-Host ' 8) Driver demo (before/after a disk query)'
         Write-Host ' 9) Exit'
-        Write-Host '---------------------------------------------'
+        Write-Host '10) CLEAN UP NOW   (remove driver + test mode)'
+        Write-Host '11) CLEAN UP + RESTART'
+        Write-Host '--------------------------------------------------'
         $pick = Read-Host 'Pick a number'
 
         switch ($pick) {
@@ -215,7 +251,27 @@ if ($Mode -eq 'menu') {
             '7' { & $client restore }
             '8' { & $client demo }
             '9' { $running = $false }
-            default { Write-Host '    pick 1-9.' -ForegroundColor DarkGray }
+            '10' {
+                if (Test-Path $cleanupScript) {
+                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cleanupScript `
+                        -RestoreRegistry -RemoveCertificate
+                } else {
+                    Write-Host '[-] Session-Cleanup.ps1 not found.' -ForegroundColor Red
+                }
+            }
+            '11' {
+                if (Test-Path $cleanupScript) {
+                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cleanupScript `
+                        -RestoreRegistry -RemoveCertificate
+                    Write-Host ''
+                    Write-Host '  Restarting in 10 seconds (Ctrl+C to cancel)...' -ForegroundColor Yellow
+                    shutdown.exe /r /t 10 /c "TempModFilter cleanup"
+                    $running = $false
+                } else {
+                    Write-Host '[-] Session-Cleanup.ps1 not found.' -ForegroundColor Red
+                }
+            }
+            default { Write-Host '    pick 1-11.' -ForegroundColor DarkGray }
         }
     }
 }
