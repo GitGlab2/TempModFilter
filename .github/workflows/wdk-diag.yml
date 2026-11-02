@@ -10,34 +10,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inspect WDK installation
+      - name: Locate WDK files
         shell: powershell
         run: |
-          "=== SDK include versions ==="
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" -Directory |
-            Select-Object -ExpandProperty Name
-          "=== ntddk.h locations ==="
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" -Recurse -Filter ntddk.h -ErrorAction SilentlyContinue |
+          "=== VSIX files ==="
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Vsix" -Recurse -Filter *.vsix -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty FullName
-          "=== Driver platform toolsets ==="
+          "=== VSIXInstaller ==="
+          Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer" -Filter 'vsixinstaller.exe' -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+          "=== Platform toolsets before ==="
           Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\Platforms\x64\PlatformToolsets" -Directory -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty Name
-          "=== WDK props/targets in VS ==="
-          Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170" -Recurse -Filter '*wdk*' -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty FullName
 
-      - name: Build with detailed log
+      - name: Install WDK VS extension
         shell: powershell
         run: |
-          $msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
-          & $msbuild .\TempModFilter.sln /m /p:Configuration=Release /p:Platform=x64 /v:diag *> diag.log
-          "exit=$LASTEXITCODE"
-          "=== resolved values ==="
-          Select-String -Path diag.log -Pattern 'WindowsTargetPlatformVersion =|WindowsSDKVersion =|WDKContentRoot =|WDKVersion =|IncludePath =' |
-            Select-Object -First 30 | ForEach-Object { $_.Line.Trim() }
-          "=== ntddk mentions ==="
-          Select-String -Path diag.log -Pattern 'ntddk|km\\|\\km;' |
-            Select-Object -First 20 | ForEach-Object { $_.Line.Trim() }
-          "=== include dirs from cl ==="
-          Select-String -Path diag.log -Pattern 'AdditionalIncludeDirectories|IncludePath>' |
-            Select-Object -First 20 | ForEach-Object { $_.Line.Trim() }
+          $vsix = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Vsix" -Recurse -Filter *.vsix -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'VS2022' } | Select-Object -First 1
+          if (-not $vsix) { Write-Host 'NO VS2022 VSIX FOUND'; exit 1 }
+          Write-Host "Installing $($vsix.FullName)"
+          $installer = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer" -Filter 'vsixinstaller.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          & $installer.FullName /quiet /admin $vsix.FullName
+          Write-Host "vsixinstaller exit=$LASTEXITCODE"
+          "=== Platform toolsets after ==="
+          Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\Platforms\x64\PlatformToolsets" -Directory -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Name
+
+      - name: Build
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\scripts\Build.ps1 -Configuration Release
