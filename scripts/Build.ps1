@@ -48,8 +48,14 @@ if (-not (Test-Path $vswhere)) {
 }
 
 $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild `
-                      -find 'MSBuild\**\Bin\MSBuild.exe' |
+                      -find 'MSBuild\**\Bin\amd64\MSBuild.exe' |
            Select-Object -First 1
+
+if (-not $msbuild) {
+    $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild `
+                          -find 'MSBuild\**\Bin\MSBuild.exe' |
+               Select-Object -First 1
+}
 
 if (-not $msbuild) {
     Write-Host '[-] MSBuild was not found inside the Visual Studio installation.' -ForegroundColor Red
