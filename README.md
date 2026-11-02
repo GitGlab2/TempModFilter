@@ -1,113 +1,91 @@
-# TempModFilter — مشروع التعديل المؤقت على مستوى النواة
+# TempModFilter — HWID Spoofer (مختبر)
 
-[![Build TempModFilter Driver](https://github.com/GitGlab2/TempModFilter/actions/workflows/build.yml/badge.svg)](https://github.com/GitGlab2/TempModFilter/actions/workflows/build.yml)
+> أداة تغيير هوية الجهاز (HWID Spoofer) مؤقتة في الذاكرة (RAM) + Registry لـ Windows.
+> **للاستخدام في المختبر / VM فقط.** لا تقم بتثبيته على مضيف إنتاج.
 
-مشروع عملي كامل مبني على [`docs/Kernel_Level_Drivers_Guide.md`](docs/Kernel_Level_Drivers_Guide.md):
-مشغّل فلتر علوي (Upper Filter Driver) بنمط **KMDF** يعترض طلبات الإدخال/الإخراج
-(`IRP`) داخل نواة Windows، ويعدّل **نسخة البيانات الموجودة في الذاكرة فقط** قبل
-تسليمها لبرنامج المستخدم.
+TempModFilter هو فلتر علوي (upper filter) بوضع Kernel (KMDF) مرتبط بفئة إعداد `DiskDrive`.
+يعترض عمليات الإدخال/الإخراج في طريق عودتها إلى وضع المستخدم (User Mode) ويقوم بإعادة كتابة
+أنماط بايتات (byte patterns) مختارة داخل المخازن (buffers) المُعادة **في RAM فقط**.
+لا يُكتب أي شيء إلى القرص، أو firmware، أو SPI flash، أو NVRAM، أو EEPROM.
+إعادة التشغيل (Reboot) تستعيد قيم القرص الأصلية بالكامل (القيم في Registry تبقى حتى `restore`).
 
-> **هذا مشروع مختبر (Lab) للتعلم والتحقق.** يعمل داخل آلة افتراضية فقط.
-> لا تكتب أي بيانات على الأقراص أو الـ Firmware، ولا تحاول تجاوز أي آلية حماية.
+تم تجميعه الآن كـ **مجموعة أدوات HWID spoofer**:
 
----
-
-## 1. الفكرة في سطر واحد
-
-```
-التطبيق يطلب بيانات  ->  الفلتر يعترض الرد  ->  يعدّل الـ Buffer في RAM
-                     ->  التطبيق يرى النسخة المعدّلة  ->  إعادة التشغيل = كل شيء أصلي
-```
-
-التعديل موجود داخل `Non-Paged Pool` / `System Buffer` الخاص بطلب واحد فقط،
-وينتهي بإنهاء الطلب أو بإعادة التشغيل. لا يوجد أي أثر على القرص أو الـ NVRAM.
+- تغيير رقم التسلسلي للقرص (Disk serial) وطرازه و firmware مؤقتًا (في الذاكرة فقط) عبر فلتر Kernel.
+- تغيير قيم Registry: MachineGuid، ProductId، Hostname، HwProfileGuid، SQM MachineId، InstallDate.
+- تغيير عنوان MAC لمحولات الشبكة عبر Registry.
+- عميل وضع المستخدم (`FilterClient.exe`) مع أوامر لكل خطوة + `show` / `restore` / `all`.
 
 ---
 
-## 2. ما يفعله المشروع فعلياً
+## الميزات
 
-| المكوّن | الوصف |
-| :--- | :--- |
-| `TempModFilter.sys` | فلتر علوي لفئة `DiskDrive` يعترض كل الطلبات ويمرّرها للأسفل، ويعدّل حقل الإخراج لطلبات `IRP_MJ_DEVICE_CONTROL` عند اكتمالها |
-| `\\.\TempModFilter` | جهاز تحكّم (Control Device) بواجهة `IOCTL` لتسليح/تعطيل السياسة أثناء التشغيل |
-| `FilterClient.exe` | عميل إداري: تسليح السياسة، قراءة العدّادات، واختبار Round-Trip يثبت أن التعديل مؤقت |
+| المجال | القدرة |
+|--------|--------|
+| رقم تسلسلي للقرص | استبدال serial/model/firmware/vendor في مخازن IOCTL (في RAM) |
+| تغيير عشوائي | توليد قيم عشوائية بنفس الطول |
+| جميع الأقراص | `--all-drives` يطبق على كل PhysicalDrive |
+| عنوان MAC | ضبط `NetworkAddress` لمحول شبكة (أو كل المحولات) عبر Registry |
+| MachineGuid | ضبط `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` |
+| ProductId | ضبط `ProductId` لـ Windows |
+| Hostname | ضبط اسم الحاسوب / NetBIOS / TCP hostname |
+| HwProfileGuid | ضبط hardware profile GUID |
+| SQM MachineId | ضبط `SOFTWARE\Microsoft\SQMClient\MachineId` |
+| InstallDate | ضبط `InstallDate` |
+| الكل في واحد | `spoof all` ينفّذ كل الخطوات |
+| محرك إعادة التسمية | استبدال سلسلة بايتات (ليس بايتًا واحدًا) |
+| pass-through | مسح السياسة (policy) يعيد القيم الأصلية فورًا |
+| عدادات | الطلبات المُشاهدة / المخازن المُفحوصة / إجمالي الاستبدالات |
+| نسخ احتياطي | `restore` يعيد قيم Registry الأصلية من نسخة احتياطية |
 
-### سياسة التعديل
-
-السياسة ليست "عنوان ثابت" بل **نمط بايتات** (Pattern) مع بايت بديل:
-
-```
-كل تكرار للنمط  "ABC123"  داخل حقل الإخراج  ->  يُستبدل بـ  "******"
-```
-
-هذا يجعل المشروع أداة **تنقيح (Redaction)** عامة وواضحة، لا أداة مرتبطة ببنية
-جهاز معيّن. يمكن تقييد التعديل على `IOCTL` واحد بعينه عبر `TargetIoControl`.
-
----
-
-## 3. ما لا يفعله المشروع (حدود متعمّدة)
-
-هذه الحدود مقصودة وموثّقة، وليست نقصاً في التنفيذ:
-
-- ❌ لا يكتب على القرص أو الـ SPI Flash أو الـ EEPROM أو الـ NVRAM.
-- ❌ لا يعدّل هياكل النواة (`SSDT`, `IDT`, `EPROCESS`, `KPCR`).
-- ❌ لا يتجاوز `PatchGuard` ولا `DSE` ولا `HVCI` ولا `VBS`.
-- ❌ لا يخفي نفسه ولا العمليات ولا الملفات.
-- ❌ لا يوفّر وصولاً عشوائياً للذاكرة الفيزيائية.
-- ❌ لا يغيّر معرّفات العتاد بشكل دائم، ولا يلمس `SMBIOS`/`DMI`.
-
-أي محاولة لتجاوز `PatchGuard` أو `DSE` تخرج عن نطاق هذا المشروع، وتؤدي عملياً
-إلى `CRITICAL_STRUCTURE_CORRUPTION` أو رفض تحميل المشغّل (خطأ 577).
+لا شيء يثبت (persist) لمسار القرص: مسح السياسة أو إعادة التشغيل يعيد القيمة الأصلية.
+قيم Registry/MAC تبقى حتى تشغيل `restore` (أو استعادة يدوية).
 
 ---
 
-## 4. بنية الملفات
+## أوامر العميل (Client commands)
 
 ```
-TempModFilter/                     جذر المستودع
-├── TempModFilter.sln              حل Visual Studio (x64 فقط)
-├── README.md
-├── LICENSE
-├── .github/workflows/build.yml    بناء تلقائي على GitHub Actions
-├── include/
-│   └── TempModShared.h            العقد المشترك: IOCTLs + Structs (UM/KM)
-├── driver/
-│   ├── FilterDriver.c             نقطة الدخول، جهاز التحكّم، مسار البيانات
-│   ├── FilterPolicy.c/.h          محرّك التعديل + الحالة المحمية بـ Spinlock
-│   ├── FilterDriver.inf           حزمة تثبيت الفلتر كفلتر فئة (DiskDrive)
-│   └── FilterDriver.vcxproj
-├── user/
-│   ├── FilterClient.cpp           عميل الأوامر + اختبار Round-Trip
-│   └── FilterClient.vcxproj
-├── scripts/
-│   ├── Build.ps1                  بناء عبر msbuild + فحص وجود WDK
-│   ├── Sign-Test.ps1              شهادة اختبار موقّعة ذاتياً + signtool
-│   ├── Install.ps1                نسخ + خدمة + UpperFilters + نسخة احتياطية
-│   ├── Uninstall.ps1              إزالة جراحية + استرجاع النسخة الاحتياطية
-│   └── Test-RoundTrip.ps1         تحقق شامل قبل/بعد
-└── docs/
-    ├── Kernel_Level_Drivers_Guide.md   الدليل الأصلي
-    └── GUIDE-CORRECTIONS.md            أخطاء الكود في الدليل وتصحيحها
+FilterClient.exe status                      عرض السياسة (policy) المُفعّلة
+FilterClient.exe stats [--reset]             عرض / إعادة تعيين العدادات
+FilterClient.exe set --pattern <p> [opts]    تفعيل قاعدة إعادة تسمية واحدة
+        --replacement <str>   سلسلة استبدال
+        --replace 0x2A        بايت يُكتب فوق كل تطابق
+        --ioctl   0x2D1400    IOCTL مستهدف (0 = الكل)
+        --max     8           استبدالات لكل طلب
+FilterClient.exe clear                       إلغاء التفعيل (pass-through)
+FilterClient.exe demo [--drive 0]            قبل/بعد round-trip على قرص
+FilterClient.exe show                        عرض هوية الجهاز الحالية
+FilterClient.exe spoof disk ...              تغيير هوية القرص في RAM (volatile)
+        [--drive 0] [--all-drives] [--random]
+        [--serial <s>] [--model <m>] [--firmware <f>] [--vendor <v>]
+        [--all-fields]
+FilterClient.exe spoof mac ...               ضبط MAC للAdapter عبر Registry
+        [--address <mac>] [--index 0|--all] [--random]
+FilterClient.exe spoof guid [--value <g>]    ضبط MachineGuid (عشوائي إذا أُهمل)
+FilterClient.exe spoof productid [--value <p>]  ضبط Windows ProductId
+FilterClient.exe spoof hostname --value <n>  ضبط اسم الحاسوب
+FilterClient.exe spoof hwprofile [--value <g>]  ضبط HwProfileGuid
+FilterClient.exe spoof sqm                   ضبط SQM MachineId
+FilterClient.exe spoof installdate [--value <n>]  ضبط InstallDate
+FilterClient.exe spoof all                   تنفيذ كل خطوات spoof (عشوائي)
+FilterClient.exe restore                    مسح الفلتر + استعادة Registry
+FilterClient.exe wmi show                   استعلام WMI عن قيم HWID
+FilterClient.exe wmi backup                 نسخ احتياطي لمستودع WMI
+FilterClient.exe wmi spoof --from <a> --to <b>  استبدال binary في مستودع WMI (طول متساوٍ)
+FilterClient.exe wmi spoof --reset-repository  إعادة تعيين مستودع WMI
+FilterClient.exe simulate ...               تشغيل خوارزمية إعادة التسمية في user mode
+FilterClient.exe help
 ```
+
+بنية النمط (Pattern): `"ABC123"` أو `"hex:41 42 43"`.
 
 ---
 
-## 5. المتطلبات
+## البناء (Build)
 
-| المتطلب | ملاحظة |
-| :--- | :--- |
-| Windows 10/11 x64 | داخل **آلة افتراضية** (Hyper-V / VMware) |
-| Visual Studio 2022 | حزمة "Desktop development with C++" |
-| Windows Driver Kit (WDK) | يوفّر `WindowsKernelModeDriver10.0` و `wdf.h` |
-| صلاحيات Administrator | للتثبيت والتوقيع والتشغيل |
-| Secure Boot = **Off** في الـ VM | شرط أساسي لـ `testsigning` |
-
-لا يوجد دعم لـ x86 ولا لـ ARM64 في هذه النسخة (البنية نفسها قابلة للنقل، لكن
-لم يتم اختبارها).
-
----
-
-## 6. البناء
+المتطلبات: Windows 10/11 x64، Visual Studio 2022 مع "Desktop development with C++"،
+Windows Driver Kit (WDK) + Windows SDK مطابق.
 
 ```powershell
 git clone https://github.com/GitGlab2/TempModFilter.git
@@ -116,191 +94,59 @@ cd TempModFilter
 .\scripts\Build.ps1 -Configuration Release
 ```
 
-> مش محتاج WDK محلياً لو هتستخدم الحزمة الجاهزة: نزّلها من صفحة
-> [Releases](https://github.com/GitGlab2/TempModFilter/releases).
-
-### إصدار جديد
-
-```powershell
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-أي tag يبدأ بـ `v` يشغّل البناء ثم ينشر Release تلقائياً بالحزمة الموقّعة،
-وإصدارات `v0.x` تُنشر كـ **Pre-release**.
-
-المخرجات:
-
+مخرجات البناء:
 ```
 build\Debug\x64\driver\TempModFilter.sys
 build\Debug\x64\user\FilterClient.exe
 ```
 
-أو من Visual Studio: افتح `TempModFilter.sln` واختر `Debug|x64`.
-
-**إن فشل البناء:** تأكد أن الـ WDK مثبّت كإضافة داخل Visual Studio، لا كحزمة
-منفصلة فقط. رسالة `The builds tools for WindowsKernelModeDriver10.0 cannot be
-found` تعني أن الإضافة غير مثبتة.
+يمكن بناء عميل وضع المستخدم (User-mode client) بشكل مستقل باستخدام MSVC + Windows SDK (بدون WDK).
 
 ---
 
-## 7. التوقيع (Test Signing)
+## توقيع الاختبار (Test signing)
 
 ```powershell
 .\scripts\Sign-Test.ps1
 ```
 
-يقوم بـ:
-1. إنشاء شهادة `CodeSigningCert` ذاتية التوقيع في `LocalMachine\My`.
-2. استيرادها إلى `Root` و `TrustedPublisher` (محلياً فقط).
-3. توقيع `TempModFilter.sys` بـ `signtool /fd SHA256`.
-
-لتصدير **النصف العام** من الشهادة مع الحزمة (بدون المفتاح الخاص):
-
-```powershell
-.\scripts\Sign-Test.ps1 -CerOutPath .\package\TempModFilter.cer
-```
-
-هذا ما يفعله الـ CI تلقائياً، لذلك حزمة الـ Artifact تحتوي
-`TempModFilter.cer` بجانب `Install.ps1`.
-
-ثم داخل الـ VM:
-
+على VM:
 ```cmd
 bcdedit /set testsigning on
 ```
 
-وأعد التشغيل. للتذكير: `testsigning` يحتاج **إيقاف Secure Boot** في إعدادات
-الجهاز الافتراضي (Generation 2).
-
-> الشهادة للاختبار فقط. لا توزّع مشغّلاً موقّعاً بها، ولا تتركها في مخزن
-> الجهاز بعد انتهاء العمل.
+(يجب تعطيل Secure Boot.)
 
 ---
 
-## 8. التثبيت
+## التثبيت (Install)
 
 ```powershell
 .\scripts\Install.ps1
 ```
 
-السكربت:
+ثم أعد التشغيل (Reboot) ليتم ربط الفلتر بفئة الأقراص (disk class).
 
-1. يرفض العمل على جهاز غير افتراضي إلا مع `-Force`.
-2. إذا وُجد `TempModFilter.cer` بجانب السكربت، يتحقق من أن Subject هو
-   `CN=TempModFilter Lab Test` ثم يستورده إلى `Root` و`TrustedPublisher`
-   (بعد تأكيد `INSTALL`، وليس قبله).
-3. يأخذ **نسخة احتياطية** من قيمة `UpperFilters` الحالية إلى
-   `C:\ProgramData\TempModFilter\UpperFilters.backup.json`.
-4. ينسخ الملف إلى `C:\Windows\System32\drivers\TempModFilter.sys`.
-5. ينشئ خدمة kernel (`start= demand`).
-6. يضيف `TempModFilter` إلى
-   `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4D36E967-E325-11CE-BFC1-08002BE10318}\UpperFilters`.
-7. يطلب إعادة تشغيل.
-
-إذا كنت تستخدم الحزمة الجاهزة من صفحة Releases بدل نسخة الريبو:
+## إلغاء التثبيت (Uninstall)
 
 ```powershell
-# نزّل TempModFilter-vX.Y.Z-x64.zip من صفحة Releases، ثم:
-Expand-Archive .\TempModFilter-v0.1.1-x64.zip -DestinationPath .\TempModFilter
-cd .\TempModFilter
-.\Install.ps1
+.\scripts\Uninstall.ps1
+.\scripts\Uninstall.ps1 -RestoreBackup -Reboot
 ```
-
-السكربت يبحث عن `TempModFilter.sys` بجانبه أولاً ثم في `build\`، ويستورد
-`TempModFilter.cer` تلقائياً. نفس الشيء ينطبق على `Test-RoundTrip.ps1`،
-فهو يستخدم `FilterClient.exe` الموجود في الحزمة.
-
-الفلتر لا يُربط فعلياً إلا عند بدء تشغيل أجهزة الفئة، لذلك **إعادة التشغيل
-إلزامية**، وليس `sc start` وحده.
-
-### المسار البديل (INF)
-
-```powershell
-.\scripts\Install.ps1 -Mode Inf
-```
-
-يستخدم `setupapi!InstallHinfSection DefaultInstall` مع `driver\FilterDriver.inf`.
-هذا المسار يحتاج حزمة موقّعة (`.cat`) لتثبيت نظيف على جهاز مقيّد، لذلك المسار
-الافتراضي هو `Manual`.
 
 ---
 
-## 9. الاستخدام
-
-```powershell
-$c = ".\build\Debug\x64\user\FilterClient.exe"
-
-& $c status                     # السياسة الحالية
-& $c stats                      # العدّادات
-& $c set --pattern "ABC123" --replace 0x2A --ioctl 0x2D1400 --max 8
-& $c clear                      # تعطيل فوري (pass-through)
-& $c demo --drive 0             # اختبار قبل/بعد على قرص
-& $c simulate                   # محاكاة الخوارزمية — بدون مشغّل إطلاقاً
-```
-
-`simulate` يشغّل نفس خوارزمية `TempModRedactBuffer` على نسخة في الذاكرة،
-ويطبع قبل/بعد بالـ hex. مفيد لتجربة السلوك على أي جهاز (حتى بدون تثبيت
-المشغّل أو `testsigning`):
-
-```powershell
-& $c simulate --pattern "WD-WCC4E1234567" --replace 0x23 --max 1
-& $c simulate --pattern "ABC" --sample "ABC 123 ABC"
-```
-
-### صيغة النمط
-
-| الصيغة | مثال |
-| :--- | :--- |
-| نص ASCII | `--pattern "ST1000DM003"` |
-| بايتات سداسية | `--pattern "hex:41 42 43"` |
-
-### الاختبار الذاتي
+## اختبار Round-trip
 
 ```powershell
 .\scripts\Test-RoundTrip.ps1
 ```
 
-يقرأ الرقم التسلسلي للقرص، يسلّح سياسة تنقيح، يعيد القراءة (يظهر مقنّعاً)،
-ثم يلغي السياسة ويعيد القراءة (يعود أصلياً). هذه الخطوة الأخيرة هي الإثبات
-العملي أن التعديل **مؤقت**.
-
-مثال للمخرجات:
-
-```
-[1/4] serial BEFORE arming the filter : "WD-WCC4N1234567"
-[2/4] policy armed for IOCTL 0x002D1400, pattern "WD-WCC4N1234567"
-[3/4] serial WITH the filter active    : "***************"
-[4/4] serial AFTER clearing the policy : "WD-WCC4N1234567"
-
-    modified in RAM      : yes
-    restored after clear : yes
-```
+يثبت أن الرقم التسلسلي يُخفى أثناء التفعيل ويُستعاد بعد الإلغاء.
 
 ---
 
-## 10. الإزالة والتراجع
-
-```powershell
-.\scripts\Uninstall.ps1              # إزالة + طلب تأكيد
-.\scripts\Uninstall.ps1 -RestoreBackup -Reboot
-```
-
-الترتيب الصحيح: إيقاف/حذف الخدمة ← إزالة الاسم من `UpperFilters` (أو استرجاع
-النسخة الاحتياطية) ← حذف الملف ← إعادة تشغيل.
-
-> المشغّل **غير قابل للتفريغ أثناء العمل** بشكل متعمّد (لا يوجد `EvtDriverUnload`)،
-> تماماً كمعظم فلاتر التخزين. لذلك `sc stop` سيفشل أثناء ارتباطه بالأقراص،
-> والانفصال الحقيقي يحدث عند إعادة التشغيل فقط.
-
-**خطة الطوارئ** إذا رفض النظام الإقلاع بعد التثبيت: أقلع في Safe Mode، أو من
-WinRE افتح `regedit` واحذف قيمة `UpperFilters` من مفتاح الفئة، ثم أعد التشغيل.
-هذه هي النقطة الوحيدة التي قد تحتاج تدخلاً يدوياً، لذلك لا تجرّب على جهاز
-إنتاجي.
-
----
-
-## 11. كيف يعمل داخلياً
+## البنية (Architecture)
 
 ```
 User mode
@@ -316,94 +162,48 @@ I/O Manager  ->  IRP (METHOD_BUFFERED)
 [ disk.sys / storport ]  ->  hardware
    |
    v
-completion routine (may run at DISPATCH_LEVEL)
-   |     3. read policy under EX_SPIN_LOCK
-   |     4. scan only IoStatus.Information bytes
-   |     5. overwrite pattern matches in the system buffer
+completion routine (قد يعمل على DISPATCH_LEVEL)
+   |     3. قراءة السياسة (policy) تحت EX_SPIN_LOCK
+   |     4. فحص IoStatus.Information bytes فقط
+   |     5. تطبيق كل القواعد (rules) على system buffer
    v
-I/O Manager  ->  caller sees modified data
+I/O Manager  ->  caller يرى البيانات المُعدّلة
 ```
 
-نقاط التصميم المهمة:
-
-- **`IoStatus.Information` هو الحد الفعلي للبيانات**: لا نلمس بقية الـ Buffer
-  لأنه غير مهيّأ وقد يسبب تسريب ذاكرة أو فساداً.
-- **`EX_SPIN_LOCK`** وليس `WDFWAITLOCK`: روتين الاكتمال قد يعمل عند
-  `DISPATCH_LEVEL`، ويُستخدم `KeAcquireSpinLockAtDpcLevel` في هذه الحالة.
-- **`WdfRequestCompleteWithInformation`**: الحفاظ على عدد البايتات المُعادة،
-  وإلا يرى المستدعي رداً بطول صفر.
-- **`EvtIoDefault`**: الفلتر يجب أن يمرّر كل شيء (قراءة/كتابة/IOCTL داخلي/
-  PnP)، وإلا تجمّد مكدس التخزين.
-- **`PowerManaged = WdfFalse`** و **`WdfIoQueueDispatchParallel`**: لا نُسلسل
-  مكدس التخزين خلف طلب واحد، ولا ندخل في إدارة طاقة لا تخصّنا.
-
-### واجهة التحكّم
-
-| IOCTL | الإدخال | الإخراج |
-| :--- | :--- | :--- |
-| `IOCTL_TEMPMOD_SET_POLICY` | `TEMPMOD_POLICY` | `TEMPMOD_POLICY` (بعد التطبيع) |
-| `IOCTL_TEMPMOD_GET_POLICY` | — | `TEMPMOD_POLICY` |
-| `IOCTL_TEMPMOD_GET_STATS` | — | `TEMPMOD_STATS` |
-| `IOCTL_TEMPMOD_RESET_STATS` | — | — |
-| `IOCTL_TEMPMOD_CLEAR_POLICY` | — | — |
-
-الأرقام والأحجام ثابتة ومُتحقَّق منها وقت الترجمة
-(`TEMPMOD_POLICY` = 92 بايت، `TEMPMOD_STATS` = 32 بايت). أي تغيير في البنية
-يجب أن يرفع `TEMPMOD_POLICY_VERSION`، والمشغّل يرفض أي إصدار مختلف
-بـ `STATUS_REVISION_MISMATCH`.
-
-جهاز التحكّم محمي بـ SDDL:
-
-```
-D:P(A;;GA;;;SY)(A;;GA;;;BA)
-```
-
-أي: SYSTEM والمجموعة الإدارية فقط، لا `Everyone` ولا `Authenticated Users`.
+- `IoStatus.Information` يحدد المنطقة المُفحوصة.
+- `EX_SPIN_LOCK` (via `KeAcquireSpinLockAtDpcLevel`) للأمان على DISPATCH_LEVEL.
+- `WdfRequestCompleteWithInformation` يحافظ على عدد البايتات.
+- `EvtIoDefault` يعالج كل أنواع الطلبات (read/write/IOCTL/PnP).
+- `PowerManaged = WdfFalse` + parallel dispatch.
 
 ---
 
-## 12. استكشاف الأخطاء
+## ملاحظات أمنية
 
-| العَرَض | السبب المرجّح | الحل |
-| :--- | :--- | :--- |
-| `CreateFile` يفشل بـ 2 | الخدمة غير محمّلة | أعد التشغيل بعد التثبيت |
-| فشل التحميل 577 | التوقيع غير مقبول | `testsigning on` + Secure Boot off + شغّل `Install.ps1` ليستورد `TempModFilter.cer` |
-| فشل التحميل 31 / 127 | تبعية KMDF غير محمّلة | تأكد أن البناء `DriverType=KMDF` وأن `Wdf01000.sys` يعمل |
-| `demo` يظهر الرقم الأصلي | الفلتر غير مرتبط بالفئة | تحقق من `UpperFilters` وأعد التشغيل |
-| `stats` يعرض `buffers scanned = 0` مع طلبات تمر | الإطار لم يوفّر حقل الإخراج | تأكد أن الطلب `METHOD_BUFFERED` وأن `TargetIoControl` يطابق كود الـ IOCTL |
-| `stats` يعرض `replacements = 0` بعد المسح | النمط غير موجود في الناتج | اطبع الناتج الخام وتأكد من البايتات (قد يكون UTF-16) |
-| `demo` يفشل بـ 5 | صلاحيات | شغّل PowerShell كمسؤول |
-| لا تظهر رسائل `DbgPrint` | مرشّح الطباعة | `reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Debug Print Filter" /v DEFAULT /t REG_DWORD /d 0xF /f` ثم أعد التشغيل، أو استخدم WinDbg |
-| `BSOD` عند الإقلاع | خطأ في الفلتر | أقلع Safe Mode واحذف `UpperFilters` |
-
-سجلات مفيدة:
-
-```
-C:\Windows\INF\setupapi.dev.log
-Event Viewer -> System -> BugCheck
-!analyze -v  (WinDbg)
-```
+- جهاز التحكم `\\.\TempModFilter` مقيّد لـ SYSTEM و Administrators عبر SDDL
+  `D:P(A;;GA;;;SY)(A;;GA;;;BA)`.
+- لا patching لـ SSDT/IDT/EPROCESS، لا bypass لـ PatchGuard/DSE/HVCI.
+- لا تغييرات دائمة (permanent) على مسار القرص؛ Registry/MAC تتغير وتُستعاد عبر `restore`.
+- **لا يغيّر SMBIOS UUID أو serial اللوحة (out of scope for this filter).**
 
 ---
 
-## 13. حالة التحقق والمسؤولية
+## استكشاف الأخطاء (Troubleshooting)
 
-- الكود مكتوب ليبني بـ WDK/MSBuild، وقد تمت مراجعته وتصحيح ثلاثة أخطاء حرجة
-  (نوع القفل `KSPIN_LOCK`، استدعاء `WdfControlFinishInitializing`، وقيمة الإرجاع
-  لـ `WdfRequestFormatRequestUsingCurrentType`). لكنه لم يُبنَ ولم يُشغَّل فعلياً
-  بعد — يحتاج بيئة Visual Studio + WDK. راجع
-  `docs/GUIDE-CORRECTIONS.md` قبل الاعتماد على أي سطر من الدليل الأصلي.
-- الفلتر يعمل داخل مسار التخزين؛ أي خطأ فيه = `BSOD` فوري. استخدم VM فقط.
-- الاستخدام المشروع: التعلم، وتطوير أدوات تنقيح/خصوصية، واختبار أنظمة المراقبة.
-  استخدم هذا المشروع في بيئة تملكها، وبما لا يخالف القوانين وشروط الخدمة.
+| العرض | السبب | الحل |
+|-------|-------|------|
+| CreateFile error 2 | Driver غير مُثبّت/مُشغّل | شغّل Install.ps1، أعد التشغيل |
+| Error 577 | Test signing / cert | `testsigning on`، Secure Boot off، ثبّت cer المرفق |
+| Error 31 / 127 | KMDF مفقود | ثبّت WDK + toolset `WindowsKernelModeDriver10.0` |
+| demo error 5 | تحليل PowerShell | شغّل من elevated PowerShell |
+| DbgPrint مفقود | debug filter | عيّن `DEFAULT` debug print filter إلى 0xF |
+| BSOD | خطأ في Driver | Safe Mode، احذف إدخال UpperFilters |
+
+السجلات: `C:\Windows\INF\setupapi.dev.log`، Event Viewer (System/BugCheck)،
+WinDbg `!analyze -v`.
 
 ---
 
-## 14. المراجع
+## الترخيص (License)
 
-- [Windows Drivers — Microsoft Learn](https://learn.microsoft.com/windows-hardware/drivers/)
-- [KMDF Filter Drivers](https://learn.microsoft.com/windows-hardware/drivers/wdf/filter-drivers)
-- [WDF I/O Queues](https://learn.microsoft.com/windows-hardware/drivers/wdf/io-queues)
-- [WdfRequestFormatRequestUsingCurrentType](https://learn.microsoft.com/windows-hardware/drivers/ddi/wdfrequest/nf-wdfrequest-wdfrequestformatrequestusingcurrenttype)
-- [Driver Verifier](https://learn.microsoft.com/windows-hardware/drivers/devtest/driver-verifier)
-- [Test Signing](https://learn.microsoft.com/windows-hardware/drivers/install/test-signing)
+انظر LICENSE. للاستخدام في المختبر/VM فقط. بدون ضمان. استخدم بمسؤولية.

@@ -366,14 +366,11 @@ TempModEvtRequestComplete(
 
     TempModGetPolicy(&g_State, &policy);
 
-    if (!policy.Enabled || policy.PatternLength == 0) {
+    if (!policy.Enabled || policy.RuleCount == 0) {
         goto Complete;
     }
 
-    if (policy.TargetIoControl != 0 &&
-        policy.TargetIoControl != Params->Parameters.Ioctl.IoControlCode) {
-        goto Complete;
-    }
+    /* Rule-level TargetIoControl filtering is done inside TempModApplyPolicy. */
 
     /*
         Only the bytes the lower driver actually produced may be touched;
@@ -388,7 +385,9 @@ TempModEvtRequestComplete(
 
     InterlockedIncrement(&g_State.BuffersScanned);
 
-    replaced = TempModRedactBuffer((PUCHAR)buffer, validLength, &policy);
+    replaced = TempModApplyPolicy((PUCHAR)buffer, validLength,
+                                  Params->Parameters.Ioctl.IoControlCode,
+                                  &policy);
 
     if (replaced > 0) {
         InterlockedExchangeAdd(&g_State.ReplacementsTotal, (LONG)replaced);

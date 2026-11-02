@@ -7,10 +7,9 @@
 
     IRQL contract:
         * TempModInitializeState / TempModResetStats : PASSIVE_LEVEL
-        * TempModGetPolicy / TempModRedactBuffer     : <= DISPATCH_LEVEL
+        * TempModGetPolicy / TempModRedactBuffer / TempModApplyPolicy : <= DISPATCH_LEVEL
         * everything else                            : PASSIVE_LEVEL
 --*/
-
 #include "FilterPolicy.h"
 
 /* ------------------------------------------------------------------------- */
@@ -57,7 +56,7 @@ TempModInitializeState(
 
     State->Policy.Version = TEMPMOD_POLICY_VERSION;
     State->Policy.Enabled = 0;
-    State->Policy.PatternLength = 0;
+    State->Policy.RuleCount = 0;
     State->Policy.MaxReplacementsPerRequest = TEMPMOD_DEFAULT_MAX_REPLACEMENTS;
 }
 
@@ -66,6 +65,8 @@ TempModValidatePolicy(
     _In_ const TEMPMOD_POLICY* Policy
     )
 {
+    ULONG i;
+
     if (Policy == NULL) {
         return STATUS_INVALID_PARAMETER;
     }
@@ -74,8 +75,11 @@ TempModValidatePolicy(
         return STATUS_REVISION_MISMATCH;
     }
 
-    if (Policy->PatternLength == 0 ||
-        Policy->PatternLength > TEMPMOD_PATTERN_MAX) {
+    if (Policy->Flags != 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (Policy->RuleCount > TEMPMOD_MAX_RULES) {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -83,8 +87,27 @@ TempModValidatePolicy(
         return STATUS_INVALID_PARAMETER;
     }
 
-    if (Policy->Flags != 0) {
+    if (Policy->Enabled != 0 && Policy->RuleCount == 0) {
         return STATUS_INVALID_PARAMETER;
+    }
+
+    for (i = 0; i < Policy->RuleCount; i++) {
+        const TEMPMOD_RULE* rule = &Policy->Rules[i];
+
+        if (rule->PatternLength == 0 ||
+            rule->PatternLength > TEMPMOD_PATTERN_MAX) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (rule->ReplacementLength != 0 &&
+            rule->ReplacementLength > TEMPMOD_PATTERN_MAX) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (rule->ReplacementLength != 0 &&
+            rule->ReplacementLength > rule->PatternLength) {
+            return STATUS_INVALID_PARAMETER;
+        }
     }
 
     return STATUS_SUCCESS;
@@ -100,22 +123,53 @@ TempModSetPolicy(
     KIRQL oldIrql = PASSIVE_LEVEL;
     BOOLEAN atDispatch;
     NTSTATUS status;
+    ULONG i;
 
     status = TempModValidatePolicy(Policy);
     if (!NT_SUCCESS(status)) {
         return status;
     }
 
+    RtlZeroMemory(&normalised, sizeof(normalised));
     normalised = *Policy;
 
-    if (normalised.PatternLength > TEMPMOD_PATTERN_MAX) {
-        normalised.PatternLength = TEMPMOD_PATTERN_MAX;
+    if (normalised.RuleCount > TEMPMOD_MAX_RULES) {
+        normalised.RuleCount = TEMPMOD_MAX_RULES;
     }
 
-    if (normalised.PatternLength < TEMPMOD_PATTERN_MAX) {
-        RtlZeroMemory(
-            &normalised.Pattern[normalised.PatternLength],
-            TEMPMOD_PATTERN_MAX - normalised.PatternLength);
+    for (i = 0; i < normalised.RuleCount; i++) {
+        TEMPMOD_RULE* rule = &normalised.Rules[i];
+
+        if (rule->PatternLength > TEMPMOD_PATTERN_MAX) {
+            rule->PatternLength = TEMPMOD_PATTERN_MAX;
+        }
+
+        if (rule->PatternLength < TEMPMOD_PATTERN_MAX) {
+            RtlZeroMemory(
+                &rule->Pattern[rule->PatternLength],
+                TEMPMOD_PATTERN_MAX - rule->PatternLength);
+        }
+
+        if (rule->ReplacementLength == 0) {
+            rule->ReplacementLength = rule->PatternLength;
+            if (rule->ReplacementLength > 0 &&
+                rule->Replacement[0] == 0) {
+                RtlFillMemory(rule->Replacement,
+                              rule->ReplacementLength, (UCHAR)'*');
+            } else if (rule->ReplacementLength > 0) {
+                RtlFillMemory(rule->Replacement,
+                              rule->ReplacementLength,
+                              rule->Replacement[0]);
+            }
+        }
+        if (rule->ReplacementLength > rule->PatternLength) {
+            rule->ReplacementLength = rule->PatternLength;
+        }
+        if (rule->ReplacementLength < TEMPMOD_PATTERN_MAX) {
+            RtlZeroMemory(
+                &rule->Replacement[rule->ReplacementLength],
+                TEMPMOD_PATTERN_MAX - rule->ReplacementLength);
+        }
     }
 
     if (normalised.MaxReplacementsPerRequest == 0) {
@@ -125,11 +179,8 @@ TempModSetPolicy(
         normalised.MaxReplacementsPerRequest = TEMPMOD_MAX_REPLACEMENTS;
     }
 
-    normalised.ReservedBytes[0] = 0;
-    normalised.ReservedBytes[1] = 0;
-    normalised.ReservedBytes[2] = 0;
     normalised.Flags = 0;
-    normalised.Enabled = (normalised.Enabled != 0) ? 1 : 0;
+    normalised.Enabled = (normalised.Enabled != 0 && normalised.RuleCount > 0) ? 1 : 0;
 
     TempModAcquire(State, &oldIrql, &atDispatch);
     State->Policy = normalised;
@@ -140,8 +191,8 @@ TempModSetPolicy(
 
 VOID
 TempModGetPolicy(
-    _Inout_ PTEMPMOD_STATE State,
-    _Out_ TEMPMOD_POLICY* Policy
+    _Inout_ PTEMPMOD_STATE  State,
+    _Out_   TEMPMOD_POLICY* Policy
     )
 {
     KIRQL oldIrql = PASSIVE_LEVEL;
@@ -162,15 +213,15 @@ TempModClearPolicy(
 
     TempModAcquire(State, &oldIrql, &atDispatch);
     State->Policy.Enabled = 0;
-    State->Policy.PatternLength = 0;
-    RtlZeroMemory(State->Policy.Pattern, TEMPMOD_PATTERN_MAX);
+    State->Policy.RuleCount = 0;
+    RtlZeroMemory(State->Policy.Rules, sizeof(State->Policy.Rules));
     TempModRelease(State, oldIrql, atDispatch);
 }
 
 VOID
 TempModGetStats(
     _Inout_ PTEMPMOD_STATE State,
-    _Out_ TEMPMOD_STATS* Stats
+    _Out_   TEMPMOD_STATS* Stats
     )
 {
     KIRQL oldIrql = PASSIVE_LEVEL;
@@ -203,7 +254,7 @@ ULONG
 TempModRedactBuffer(
     _Inout_updates_bytes_(Length) PUCHAR Buffer,
     _In_ size_t Length,
-    _In_ const TEMPMOD_POLICY* Policy
+    _In_ const TEMPMOD_RULE* Rule
     )
 {
     size_t index;
@@ -211,15 +262,71 @@ TempModRedactBuffer(
     ULONG replacements;
     ULONG limit;
 
-    if (Buffer == NULL || Policy == NULL) {
+    if (Buffer == NULL || Rule == NULL) {
         return 0;
     }
 
-    patternLength = Policy->PatternLength;
+    patternLength = Rule->PatternLength;
 
     if (patternLength == 0 ||
         patternLength > TEMPMOD_PATTERN_MAX ||
         patternLength > Length) {
+        return 0;
+    }
+
+    limit = TEMPMOD_DEFAULT_MAX_REPLACEMENTS;
+
+    replacements = 0;
+
+    for (index = 0;
+         (index + patternLength) <= Length && replacements < limit;
+         index++) {
+
+        if (Buffer[index] != Rule->Pattern[0]) {
+            continue;
+        }
+
+        if (RtlCompareMemory(Buffer + index, Rule->Pattern, patternLength)
+                != patternLength) {
+            continue;
+        }
+
+        {
+            size_t replLen = Rule->ReplacementLength;
+            if (replLen == 0) {
+                replLen = patternLength;
+            }
+            if (replLen > patternLength) {
+                replLen = patternLength;
+            }
+            for (size_t k = 0; k < patternLength; k++) {
+                if (k < replLen) {
+                    Buffer[index + k] = Rule->Replacement[k];
+                } else {
+                    Buffer[index + k] = (UCHAR)' ';
+                }
+            }
+        }
+        replacements++;
+        index += (patternLength - 1);
+    }
+
+    return replacements;
+}
+
+ULONG
+TempModApplyPolicy(
+    _Inout_updates_bytes_(Length) PUCHAR Buffer,
+    _In_ size_t Length,
+    _In_ ULONG IoControl,
+    _In_ const TEMPMOD_POLICY* Policy
+    )
+{
+    ULONG total = 0;
+    ULONG i;
+    ULONG limit;
+
+    if (Buffer == NULL || Policy == NULL || !Policy->Enabled) {
         return 0;
     }
 
@@ -228,25 +335,22 @@ TempModRedactBuffer(
         limit = TEMPMOD_DEFAULT_MAX_REPLACEMENTS;
     }
 
-    replacements = 0;
+    for (i = 0; i < Policy->RuleCount && i < TEMPMOD_MAX_RULES; i++) {
+        const TEMPMOD_RULE* rule = &Policy->Rules[i];
 
-    for (index = 0;
-         (index + patternLength) <= Length && replacements < limit;
-         index++) {
-
-        if (Buffer[index] != Policy->Pattern[0]) {
+        if (rule->PatternLength == 0) {
+            continue;
+        }
+        if (rule->TargetIoControl != 0 &&
+            rule->TargetIoControl != IoControl) {
             continue;
         }
 
-        if (RtlCompareMemory(Buffer + index, Policy->Pattern, patternLength)
-                != patternLength) {
-            continue;
+        total += TempModRedactBuffer(Buffer, Length, rule);
+        if (total >= limit) {
+            break;
         }
-
-        RtlFillMemory(Buffer + index, patternLength, Policy->Replacement);
-        replacements++;
-        index += (patternLength - 1);
     }
 
-    return replacements;
+    return total;
 }

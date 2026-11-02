@@ -5,7 +5,6 @@
     Everything here must be safe to call from a completion routine, i.e.
     from PASSIVE_LEVEL up to DISPATCH_LEVEL.
 --*/
-
 #pragma once
 
 #include <ntddk.h>
@@ -65,15 +64,24 @@ TempModResetStats(
     );
 
 /*
-    Overwrites every occurrence of Policy->Pattern inside Buffer with
-    Policy->Replacement. Returns the number of replacements performed.
-
-    The caller must guarantee that Buffer is writable, non-paged and that
-    Length describes the *valid* part of the buffer.
+    Overwrites every occurrence of Rule->Pattern inside Buffer with
+    Rule->Replacement. Returns the number of replacements performed.
 */
 ULONG
 TempModRedactBuffer(
     _Inout_updates_bytes_(Length) PUCHAR                Buffer,
     _In_                          size_t                Length,
+    _In_                          const TEMPMOD_RULE*   Rule
+    );
+
+/*
+    Applies every enabled rule in Policy whose TargetIoControl matches IoControl
+    (0 in the rule means "any"). Returns the total number of replacements.
+*/
+ULONG
+TempModApplyPolicy(
+    _Inout_updates_bytes_(Length) PUCHAR                Buffer,
+    _In_                          size_t                Length,
+    _In_                          ULONG                 IoControl,
     _In_                          const TEMPMOD_POLICY* Policy
     );
