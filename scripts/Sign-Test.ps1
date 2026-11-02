@@ -148,7 +148,7 @@ if (Test-Path $cerPath) {
         }
         Copy-Item -Path $cerPath -Destination $CerOutPath -Force
         Write-Host ''
-        Write-Step "public cert  : $CerOutPath"
+        Write-Host "    public cert  : $CerOutPath"
         Write-Host '    Ship this file with the driver: it is the public half only,'
         Write-Host '    and the target machine needs it in TrustedPublisher.'
     }
