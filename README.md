@@ -142,6 +142,15 @@ found` تعني أن الإضافة غير مثبتة.
 2. استيرادها إلى `Root` و `TrustedPublisher` (محلياً فقط).
 3. توقيع `TempModFilter.sys` بـ `signtool /fd SHA256`.
 
+لتصدير **النصف العام** من الشهادة مع الحزمة (بدون المفتاح الخاص):
+
+```powershell
+.\scripts\Sign-Test.ps1 -CerOutPath .\package\TempModFilter.cer
+```
+
+هذا ما يفعله الـ CI تلقائياً، لذلك حزمة الـ Artifact تحتوي
+`TempModFilter.cer` بجانب `Install.ps1`.
+
 ثم داخل الـ VM:
 
 ```cmd
@@ -165,13 +174,28 @@ bcdedit /set testsigning on
 السكربت:
 
 1. يرفض العمل على جهاز غير افتراضي إلا مع `-Force`.
-2. يأخذ **نسخة احتياطية** من قيمة `UpperFilters` الحالية إلى
+2. إذا وُجد `TempModFilter.cer` بجانب السكربت، يتحقق من أن Subject هو
+   `CN=TempModFilter Lab Test` ثم يستورده إلى `Root` و`TrustedPublisher`
+   (بعد تأكيد `INSTALL`، وليس قبله).
+3. يأخذ **نسخة احتياطية** من قيمة `UpperFilters` الحالية إلى
    `C:\ProgramData\TempModFilter\UpperFilters.backup.json`.
-3. ينسخ الملف إلى `C:\Windows\System32\drivers\TempModFilter.sys`.
-4. ينشئ خدمة kernel (`start= demand`).
-5. يضيف `TempModFilter` إلى
+4. ينسخ الملف إلى `C:\Windows\System32\drivers\TempModFilter.sys`.
+5. ينشئ خدمة kernel (`start= demand`).
+6. يضيف `TempModFilter` إلى
    `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4D36E967-E325-11CE-BFC1-08002BE10318}\UpperFilters`.
-6. يطلب إعادة تشغيل.
+7. يطلب إعادة تشغيل.
+
+إذا كنت تستخدم حزمة الـ Artifact من GitHub بدل نسخة الريبو:
+
+```powershell
+Expand-Archive TempModFilter-Release-x64.zip -DestinationPath .
+cd TempModFilter-Release-x64
+.\Install.ps1
+```
+
+السكربت يبحث عن `TempModFilter.sys` بجانبه أولاً ثم في `build\`، ويستورد
+`TempModFilter.cer` تلقائياً. نفس الشيء ينطبق على `Test-RoundTrip.ps1`،
+فهو يستخدم `FilterClient.exe` الموجود في الحزمة.
 
 الفلتر لا يُربط فعلياً إلا عند بدء تشغيل أجهزة الفئة، لذلك **إعادة التشغيل
 إلزامية**، وليس `sc start` وحده.

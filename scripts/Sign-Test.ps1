@@ -18,13 +18,15 @@
 .EXAMPLE
     .\Sign-Test.ps1
     .\Sign-Test.ps1 -SysPath ..\build\Release\x64\driver\TempModFilter.sys
+    .\Sign-Test.ps1 -CerOutPath ..\package\TempModFilter.cer
 #>
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
     [string]$SysPath,
-    [string]$Subject  = 'CN=TempModFilter Lab Test',
-    [string]$Password = 'TempModFilter!2026',
+    [string]$Subject    = 'CN=TempModFilter Lab Test',
+    [string]$Password   = 'TempModFilter!2026',
+    [string]$CerOutPath,
     [switch]$KeepCertificate
 )
 
@@ -139,6 +141,17 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (Test-Path $cerPath) {
+    if ($CerOutPath) {
+        $cerDir = Split-Path -Parent $CerOutPath
+        if ($cerDir -and -not (Test-Path $cerDir)) {
+            New-Item -ItemType Directory -Path $cerDir -Force | Out-Null
+        }
+        Copy-Item -Path $cerPath -Destination $CerOutPath -Force
+        Write-Host ''
+        Write-Step "public cert  : $CerOutPath"
+        Write-Host '    Ship this file with the driver: it is the public half only,'
+        Write-Host '    and the target machine needs it in TrustedPublisher.'
+    }
     Remove-Item $cerPath -Force
 }
 

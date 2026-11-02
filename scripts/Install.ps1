@@ -7,12 +7,13 @@
 
     The script:
       1. refuses to run outside a virtual machine unless -Force is given,
-      2. backs up the class UpperFilters value (so Uninstall can restore it
+      2. trusts the bundled test certificate (TempModFilter.cer) when present,
+      3. backs up the class UpperFilters value (so Uninstall can restore it
          exactly, instead of deleting somebody else's filter),
-      3. copies the driver to %SystemRoot%\System32\drivers,
-      4. creates the kernel service,
-      5. appends "TempModFilter" to the DiskDrive class UpperFilters,
-      6. asks for a reboot (the filter only attaches at device start).
+      4. copies the driver to %SystemRoot%\System32\drivers,
+      5. creates the kernel service,
+      6. appends "TempModFilter" to the DiskDrive class UpperFilters,
+      7. asks for a reboot (the filter only attaches at device start).
 
     Two modes:
       Manual (default) - sc.exe + registry, no INF processing. This is the
@@ -110,13 +111,22 @@ try {
 # ---------------------------------------------------------------------------
 
 if (-not $DriverPath) {
+    # Release package layout: the .sys sits next to this script.
+    $beside = Join-Path $scriptRoot "$ServiceName.sys"
+    if (Test-Path $beside) {
+        $DriverPath = $beside
+    }
+}
+
+if (-not $DriverPath) {
     $candidate = Get-ChildItem -Path (Join-Path $projectRoot 'build') -Recurse `
                                -Filter "$ServiceName.sys" -ErrorAction SilentlyContinue |
                  Sort-Object LastWriteTime -Descending |
                  Select-Object -First 1
 
     if (-not $candidate) {
-        Write-Fail "no $ServiceName.sys under build\. Run scripts\Build.ps1 first."
+        Write-Fail "no $ServiceName.sys under build\ or next to this script."
+        Write-Host '    Run scripts\Build.ps1 first, or run this script from the release package.'
         exit 1
     }
     $DriverPath = $candidate.FullName
@@ -143,6 +153,38 @@ if (-not $NoPrompt -and -not $Force) {
         Write-Fail 'aborted.'
         exit 1
     }
+}
+
+# ---------------------------------------------------------------------------
+# Trust the bundled test certificate (after the explicit confirmation)
+# ---------------------------------------------------------------------------
+# The release package ships the public half of the certificate that signed the
+# driver.  Trusting it here is what makes the signature valid on this machine;
+# without it the kernel rejects the image with error 577 (or 0xC0000428).
+
+$cerPath = Join-Path $scriptRoot 'TempModFilter.cer'
+
+if (Test-Path $cerPath) {
+    try {
+        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $cerPath
+
+        if ($cert.Subject -eq 'CN=TempModFilter Lab Test') {
+            foreach ($store in @('Root', 'TrustedPublisher')) {
+                Import-Certificate -FilePath $cerPath `
+                                   -CertStoreLocation "Cert:\LocalMachine\$store" | Out-Null
+            }
+            Write-Step "test cert     : $($cert.Thumbprint) (trusted)"
+        } else {
+            Write-Warn "ignoring $cerPath - unexpected subject '$($cert.Subject)'."
+            Write-Host '    Expected CN=TempModFilter Lab Test.'
+        }
+    } catch {
+        Write-Warn "could not import $cerPath : $($_.Exception.Message)"
+    }
+} else {
+    Write-Warn 'TempModFilter.cer not found next to this script.'
+    Write-Host '    Run scripts\Sign-Test.ps1 -CerOutPath .\TempModFilter.cer, or'
+    Write-Host '    import the signing certificate into TrustedPublisher manually.'
 }
 
 # ---------------------------------------------------------------------------

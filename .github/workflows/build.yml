@@ -27,7 +27,8 @@ jobs:
       - name: Sign Driver with Test Certificate
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File .\scripts\Sign-Test.ps1
+          New-Item -ItemType Directory -Path .\package -Force | Out-Null
+          powershell -ExecutionPolicy Bypass -File .\scripts\Sign-Test.ps1 -CerOutPath .\package\TempModFilter.cer
 
       - name: Prepare Release Package
         shell: powershell

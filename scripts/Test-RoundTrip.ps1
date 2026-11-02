@@ -77,7 +77,11 @@ Write-Step "driver file   : $driverFile"
 # 2. Client
 # ---------------------------------------------------------------------------
 
-$client = Join-Path $projectRoot "build\$Configuration\x64\user\FilterClient.exe"
+$client = Join-Path $scriptRoot 'FilterClient.exe'
+
+if (-not (Test-Path $client)) {
+    $client = Join-Path $projectRoot "build\$Configuration\x64\user\FilterClient.exe"
+}
 
 if (-not (Test-Path $client)) {
     $found = Get-ChildItem -Path (Join-Path $projectRoot 'build') -Recurse `
@@ -88,7 +92,7 @@ if (-not (Test-Path $client)) {
 }
 
 if (-not (Test-Path $client)) {
-    Write-Fail 'FilterClient.exe not found. Run scripts\Build.ps1 first.'
+    Write-Fail 'FilterClient.exe not found. Run scripts\Build.ps1 first, or run this from the release package.'
     exit 1
 }
 
