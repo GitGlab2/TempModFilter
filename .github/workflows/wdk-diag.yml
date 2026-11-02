@@ -1,6 +1,7 @@
 name: WDK Diagnostics
 
 on:
+  push:
   workflow_dispatch:
 
 jobs:
